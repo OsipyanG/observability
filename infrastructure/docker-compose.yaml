@@ -1,0 +1,276 @@
+# Определяем сети для изоляции сервисов
+networks:
+  monitoring:
+    driver: bridge
+    name: diploma-monitoring
+  kafka-net:
+    driver: bridge
+    name: diploma-kafka
+  app-net:
+    driver: bridge
+    name: diploma-app
+
+# Именованные volumes для персистентности данных
+volumes:
+  kafka-data:
+    name: diploma-kafka-data
+  zookeeper-data:
+    name: diploma-zookeeper-data
+  zookeeper-logs:
+    name: diploma-zookeeper-logs
+  prometheus-data:
+    name: diploma-prometheus-data
+  grafana-data:
+    name: diploma-grafana-data
+
+services:
+  # Zookeeper - необходим для Kafka
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.0
+    container_name: diploma-zookeeper
+    restart: unless-stopped
+    networks:
+      - kafka-net
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      ZOOKEEPER_DATA_DIR: /var/lib/zookeeper/data
+      ZOOKEEPER_DATA_LOG_DIR: /var/lib/zookeeper/log
+      ZOOKEEPER_LOG4J_ROOT_LOGLEVEL: WARN
+    volumes:
+      - zookeeper-data:/var/lib/zookeeper/data
+      - zookeeper-logs:/var/lib/zookeeper/log
+    healthcheck:
+      test: ["CMD", "nc", "-z", "localhost", "2181"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Kafka - основной брокер сообщений
+  kafka:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: diploma-kafka
+    restart: unless-stopped
+    networks:
+      - kafka-net
+      - monitoring
+      - app-net
+    ports:
+      - "9092:9092"
+      - "9101:9101"  # JMX port для мониторинга
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      
+      # Настройки listeners
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      
+      # Настройки репликации для single-node setup
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      
+      # Настройки топиков
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 1
+      
+      # JMX настройки для мониторинга
+      KAFKA_JMX_PORT: 9101
+      KAFKA_JMX_HOSTNAME: localhost
+      
+      # Логирование
+      KAFKA_LOG4J_ROOT_LOGLEVEL: WARN
+      KAFKA_LOG4J_LOGGERS: "kafka.controller=INFO,kafka.producer.async.DefaultEventHandler=INFO,state.change.logger=INFO"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # Kafka UI - веб-интерфейс для управления Kafka
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: diploma-kafka-ui
+    restart: unless-stopped
+    networks:
+      - kafka-net
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: diploma-cluster
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+      DYNAMIC_CONFIG_ENABLED: "true"
+      LOGGING_LEVEL_ROOT: WARN
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+  # Prometheus - система мониторинга
+  prometheus:
+    image: prom/prometheus:v2.52.0
+    container_name: diploma-prometheus
+    restart: unless-stopped
+    networks:
+      - monitoring
+      - app-net
+    ports:
+      - "9090:9090"
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+      - '--web.route-prefix=/'
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alert.rules.yml:/etc/prometheus/alert.rules.yml:ro
+      - prometheus-data:/prometheus
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # Alertmanager - управление алертами
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: diploma-alertmanager
+    restart: unless-stopped
+    networks:
+      - monitoring
+    ports:
+      - "9093:9093"
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+      - '--web.external-url=http://localhost:9093'
+      - '--cluster.listen-address='
+    volumes:
+      - ./monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    depends_on:
+      prometheus:
+        condition: service_healthy
+
+  # Grafana - визуализация метрик
+  grafana:
+    image: grafana/grafana:11.0.0
+    container_name: diploma-grafana
+    restart: unless-stopped
+    networks:
+      - monitoring
+    ports:
+      - "3000:3000"
+    environment:
+      # Настройки безопасности
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_USERS_ALLOW_ORG_CREATE: "false"
+      
+      # Настройки UI
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/overview.json
+      
+      # Плагины
+      GF_INSTALL_PLUGINS: grafana-piechart-panel,grafana-clock-panel
+      
+      # Логирование
+      GF_LOG_LEVEL: warn
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      prometheus:
+        condition: service_healthy
+
+  # Kafka Exporter - экспорт метрик Kafka в Prometheus
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:v1.7.0
+    container_name: diploma-kafka-exporter
+    restart: unless-stopped
+    networks:
+      - kafka-net
+      - monitoring
+    ports:
+      - "9308:9308"
+    command:
+      - "--kafka.server=kafka:29092"
+      - "--web.listen-address=0.0.0.0:9308"
+      - "--log.level=warn"
+    depends_on:
+      kafka:
+        condition: service_healthy
+
+  # Наше Go приложение
+  sample-app:
+    build: 
+      context: ../apps/sample-app
+      dockerfile: Dockerfile
+      args:
+        - GO_VERSION=1.21
+    image: diploma-sample-app:latest
+    container_name: diploma-sample-app
+    restart: unless-stopped
+    networks:
+      - kafka-net
+      - monitoring
+      - app-net
+    ports:
+      - "8081:8080"
+    environment:
+      # Kafka настройки
+      KAFKA_BROKER_LIST: kafka:29092
+      KAFKA_TOPIC: events
+      
+      # Server настройки
+      SERVER_ADDRESS: ":8080"
+      SERVER_READ_TIMEOUT: 15s
+      SERVER_WRITE_TIMEOUT: 15s
+      SERVER_IDLE_TIMEOUT: 60s
+      
+      # Логирование
+      LOG_LEVEL: info
+    depends_on:
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # Init container для создания топиков
+  kafka-init:
+    image: confluentinc/cp-kafka:7.6.0
+    container_name: diploma-kafka-init
+    networks:
+      - kafka-net
+    depends_on:
+      kafka:
+        condition: service_healthy
+    command: |
+      bash -c "
+        echo 'Creating Kafka topics...'
+        kafka-topics --create --if-not-exists --bootstrap-server kafka:29092 --partitions 3 --replication-factor 1 --topic events
+        kafka-topics --create --if-not-exists --bootstrap-server kafka:29092 --partitions 1 --replication-factor 1 --topic events-dlq
+        echo 'Topics created successfully!'
+      "
+    restart: "no" 
