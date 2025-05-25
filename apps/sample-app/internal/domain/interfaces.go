@@ -12,7 +12,6 @@ type EventPublisher interface {
 type MetricsCollector interface {
 	IncHTTPRequests(method, endpoint, status string)
 	ObserveHTTPDuration(method, endpoint string, duration float64)
-	IncKafkaMessages(topic, status string)
 }
 
 // EventUseCase интерфейс для use cases событий

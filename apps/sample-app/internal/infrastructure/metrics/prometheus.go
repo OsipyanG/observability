@@ -11,7 +11,6 @@ import (
 type PrometheusCollector struct {
 	httpRequestsTotal   *prometheus.CounterVec
 	httpRequestDuration *prometheus.HistogramVec
-	kafkaMessagesTotal  *prometheus.CounterVec
 }
 
 // NewPrometheusCollector создает новый Prometheus collector
@@ -49,7 +48,6 @@ func NewPrometheusCollector() *PrometheusCollector {
 	return &PrometheusCollector{
 		httpRequestsTotal:   httpRequestsTotal,
 		httpRequestDuration: httpRequestDuration,
-		kafkaMessagesTotal:  kafkaMessagesTotal,
 	}
 }
 
@@ -61,11 +59,6 @@ func (p *PrometheusCollector) IncHTTPRequests(method, endpoint, status string) {
 // ObserveHTTPDuration записывает длительность HTTP запроса
 func (p *PrometheusCollector) ObserveHTTPDuration(method, endpoint string, duration float64) {
 	p.httpRequestDuration.WithLabelValues(method, endpoint).Observe(duration)
-}
-
-// IncKafkaMessages увеличивает счетчик Kafka сообщений
-func (p *PrometheusCollector) IncKafkaMessages(topic, status string) {
-	p.kafkaMessagesTotal.WithLabelValues(topic, status).Inc()
 }
 
 // Handler возвращает HTTP handler для метрик

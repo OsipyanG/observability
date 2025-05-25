@@ -30,11 +30,9 @@ func (u *EventUseCase) CreateUserEvent(ctx context.Context, data string) (*domai
 	}
 
 	if err := u.publisher.Publish(ctx, event); err != nil {
-		u.metrics.IncKafkaMessages("events", "error")
 		return nil, fmt.Errorf("failed to publish user event: %w", err)
 	}
 
-	u.metrics.IncKafkaMessages("events", "success")
 	return event, nil
 }
 
@@ -47,11 +45,9 @@ func (u *EventUseCase) CreateOrderEvent(ctx context.Context, data string) (*doma
 	}
 
 	if err := u.publisher.Publish(ctx, event); err != nil {
-		u.metrics.IncKafkaMessages("events", "error")
 		return nil, fmt.Errorf("failed to publish order event: %w", err)
 	}
 
-	u.metrics.IncKafkaMessages("events", "success")
 	return event, nil
 }
 
@@ -64,10 +60,8 @@ func (u *EventUseCase) CreatePaymentEvent(ctx context.Context, data string) (*do
 	}
 
 	if err := u.publisher.Publish(ctx, event); err != nil {
-		u.metrics.IncKafkaMessages("events", "error")
 		return nil, fmt.Errorf("failed to publish payment event: %w", err)
 	}
 
-	u.metrics.IncKafkaMessages("events", "success")
 	return event, nil
 }
