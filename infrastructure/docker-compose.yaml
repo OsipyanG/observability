@@ -185,7 +185,7 @@ services:
       GF_USERS_ALLOW_ORG_CREATE: "false"
       
       # Настройки UI
-      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/overview.json
+      # GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/overview.json
       
       # Плагины
       GF_INSTALL_PLUGINS: grafana-piechart-panel,grafana-clock-panel
@@ -223,8 +223,6 @@ services:
     build: 
       context: ../apps/producer-service
       dockerfile: Dockerfile
-      args:
-        - GO_VERSION=1.21
     image: diploma-producer-service:latest
     container_name: diploma-producer-service
     restart: unless-stopped
@@ -234,6 +232,7 @@ services:
       - app-net
     ports:
       - "8081:8080"
+      - "8082:9090"
     environment:
       # Kafka настройки
       KAFKA_BROKER_LIST: kafka:29092
@@ -244,6 +243,11 @@ services:
       SERVER_READ_TIMEOUT: 15s
       SERVER_WRITE_TIMEOUT: 15s
       SERVER_IDLE_TIMEOUT: 60s
+      
+      # Metrics настройки
+      METRICS_ENABLED: "true"
+      METRICS_PORT: ":9090"
+      METRICS_PATH: "/metrics"
       
       # Логирование
       LOG_LEVEL: info

@@ -1,10 +1,104 @@
 groups:
-  - name: latency.rules
+  - name: kafka_services
     rules:
-      - alert: HighLatency
-        expr: histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[1m])) > 0.25
+      # Producer Service Alerts
+      - alert: ProducerHighFailureRate
+        expr: rate(producer_events_failed_total[5m]) / rate(producer_events_published_total[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+          service: producer
+        annotations:
+          summary: "Producer service has high failure rate"
+          description: "Producer failure rate is {{ $value | humanizePercentage }} over the last 5 minutes"
+
+      - alert: ProducerSlowPublishing
+        expr: histogram_quantile(0.95, rate(producer_publish_duration_seconds_bucket[5m])) > 1
+        for: 3m
+        labels:
+          severity: warning
+          service: producer
+        annotations:
+          summary: "Producer service is slow"
+          description: "95th percentile publish duration is {{ $value }}s"
+
+      - alert: ProducerDown
+        expr: up{job="producer-service"} == 0
         for: 1m
         labels:
           severity: critical
+          service: producer
         annotations:
-          summary: "Высокая задержка p99 в течение последней минуты"
+          summary: "Producer service is down"
+          description: "Producer service has been down for more than 1 minute"
+
+      # Consumer Service Alerts
+      - alert: ConsumerHighFailureRate
+        expr: rate(consumer_service_events_failed_total[5m]) / rate(consumer_service_events_consumed_total[5m]) > 0.1
+        for: 2m
+        labels:
+          severity: warning
+          service: consumer
+        annotations:
+          summary: "Consumer service has high failure rate"
+          description: "Consumer failure rate is {{ $value | humanizePercentage }} over the last 5 minutes"
+
+      - alert: ConsumerSlowProcessing
+        expr: histogram_quantile(0.95, rate(consumer_service_processing_duration_seconds_bucket[5m])) > 5
+        for: 3m
+        labels:
+          severity: warning
+          service: consumer
+        annotations:
+          summary: "Consumer service is slow"
+          description: "95th percentile processing duration is {{ $value }}s"
+
+      - alert: ConsumerHighLag
+        expr: consumer_service_kafka_lag > 1000
+        for: 5m
+        labels:
+          severity: warning
+          service: consumer
+        annotations:
+          summary: "Consumer has high lag"
+          description: "Consumer lag is {{ $value }} messages on topic {{ $labels.topic }}"
+
+      - alert: ConsumerDown
+        expr: up{job="consumer-service"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: consumer
+        annotations:
+          summary: "Consumer service is down"
+          description: "Consumer service has been down for more than 1 minute"
+
+      # HTTP Alerts
+      - alert: HighHTTPErrorRate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m]) > 0.05
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High HTTP error rate"
+          description: "HTTP 5xx error rate is {{ $value | humanizePercentage }} for {{ $labels.job }}"
+
+      - alert: SlowHTTPRequests
+        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 2
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Slow HTTP requests"
+          description: "95th percentile HTTP request duration is {{ $value }}s for {{ $labels.job }}"
+
+      # Kafka Infrastructure Alerts
+      - alert: KafkaDown
+        expr: up{job="kafka-exporter"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: kafka
+        annotations:
+          summary: "Kafka is down"
+          description: "Kafka has been down for more than 1 minute"
