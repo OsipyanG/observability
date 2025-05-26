@@ -39,12 +39,6 @@ type EventService interface {
 
 	// CreateUserEvent создает событие создания пользователя
 	CreateUserEvent(ctx context.Context, data string) (*Event, error)
-
-	// CreateOrderEvent создает событие размещения заказа
-	CreateOrderEvent(ctx context.Context, data string) (*Event, error)
-
-	// CreatePaymentEvent создает событие обработки платежа
-	CreatePaymentEvent(ctx context.Context, data string) (*Event, error)
 }
 
 // EventStats статистика по событиям
@@ -81,6 +75,4 @@ type MetricsCollector interface {
 // EventUseCase интерфейс для use cases событий
 type EventUseCase interface {
 	CreateUserEvent(ctx context.Context, data string) (*Event, error)
-	CreateOrderEvent(ctx context.Context, data string) (*Event, error)
-	CreatePaymentEvent(ctx context.Context, data string) (*Event, error)
 }

@@ -69,8 +69,6 @@ func main() {
 	// Регистрируем маршруты
 	api := router.PathPrefix("/api/v1").Subrouter()
 	api.HandleFunc("/events/user", eventHandler.CreateUserEvent).Methods("POST")
-	api.HandleFunc("/events/order", eventHandler.CreateOrderEvent).Methods("POST")
-	api.HandleFunc("/events/payment", eventHandler.CreatePaymentEvent).Methods("POST")
 	api.HandleFunc("/events/stats", eventHandler.GetEventStats).Methods("GET")
 
 	// Системные маршруты

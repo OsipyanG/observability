@@ -32,9 +32,7 @@ var (
 type EventType string
 
 const (
-	UserCreatedEvent      EventType = "user_created"
-	OrderPlacedEvent      EventType = "order_placed"
-	PaymentProcessedEvent EventType = "payment_processed"
+	UserCreatedEvent EventType = "user_created"
 )
 
 // String возвращает строковое представление типа события
@@ -45,7 +43,7 @@ func (et EventType) String() string {
 // IsValid проверяет, является ли тип события валидным
 func (et EventType) IsValid() bool {
 	switch et {
-	case UserCreatedEvent, OrderPlacedEvent, PaymentProcessedEvent:
+	case UserCreatedEvent:
 		return true
 	default:
 		return false

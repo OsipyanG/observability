@@ -119,29 +119,9 @@ func (s *EventService) CreateUserEvent(ctx context.Context, data string) (*domai
 	return s.CreateAndPublish(ctx, domain.UserCreatedEvent, data)
 }
 
-// CreateOrderEvent создает событие размещения заказа
-func (s *EventService) CreateOrderEvent(ctx context.Context, data string) (*domain.Event, error) {
-	return s.CreateAndPublish(ctx, domain.OrderPlacedEvent, data)
-}
-
-// CreatePaymentEvent создает событие обработки платежа
-func (s *EventService) CreatePaymentEvent(ctx context.Context, data string) (*domain.Event, error) {
-	return s.CreateAndPublish(ctx, domain.PaymentProcessedEvent, data)
-}
-
 // CreateUserEventJSON создает событие создания пользователя из JSON
 func (s *EventService) CreateUserEventJSON(ctx context.Context, data interface{}) (*domain.Event, error) {
 	return s.CreateAndPublishJSON(ctx, domain.UserCreatedEvent, data)
-}
-
-// CreateOrderEventJSON создает событие размещения заказа из JSON
-func (s *EventService) CreateOrderEventJSON(ctx context.Context, data interface{}) (*domain.Event, error) {
-	return s.CreateAndPublishJSON(ctx, domain.OrderPlacedEvent, data)
-}
-
-// CreatePaymentEventJSON создает событие обработки платежа из JSON
-func (s *EventService) CreatePaymentEventJSON(ctx context.Context, data interface{}) (*domain.Event, error) {
-	return s.CreateAndPublishJSON(ctx, domain.PaymentProcessedEvent, data)
 }
 
 // updateStats обновляет статистику сервиса
