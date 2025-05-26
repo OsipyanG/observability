@@ -102,3 +102,43 @@ groups:
         annotations:
           summary: "Kafka is down"
           description: "Kafka has been down for more than 1 minute"
+
+      - alert: KafkaBrokerDown
+        expr: kafka_brokers < 1
+        for: 1m
+        labels:
+          severity: critical
+          service: kafka
+        annotations:
+          summary: "Kafka broker is down"
+          description: "Number of active Kafka brokers is {{ $value }}"
+
+      - alert: KafkaHighConsumerLag
+        expr: kafka_consumergroup_lag > 1000
+        for: 5m
+        labels:
+          severity: warning
+          service: kafka
+        annotations:
+          summary: "High consumer lag detected"
+          description: "Consumer group {{ $labels.consumergroup }} has lag of {{ $value }} on topic {{ $labels.topic }}"
+
+      - alert: KafkaTopicPartitionOffsetNotIncreasing
+        expr: increase(kafka_topic_partition_current_offset[10m]) == 0
+        for: 10m
+        labels:
+          severity: warning
+          service: kafka
+        annotations:
+          summary: "Kafka topic partition offset not increasing"
+          description: "Topic {{ $labels.topic }} partition {{ $labels.partition }} offset has not increased in 10 minutes"
+
+      - alert: KafkaConsumerGroupMembersDown
+        expr: kafka_consumergroup_members == 0
+        for: 2m
+        labels:
+          severity: warning
+          service: kafka
+        annotations:
+          summary: "No active members in consumer group"
+          description: "Consumer group {{ $labels.consumergroup }} has no active members"

@@ -274,7 +274,7 @@ services:
       - monitoring
       - app-net
     ports:
-      - "9092:9090" 
+      - "9094:9090" 
     environment:
       # Kafka настройки
       KAFKA_BROKER_LIST: kafka:29092
