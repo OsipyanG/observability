@@ -100,7 +100,7 @@
           "refId": "A"
         },
         {
-          "expr": "rate(consumer_service_events_consumed_total[5m])",
+          "expr": "rate(consumer_events_consumed_total[5m])",
           "interval": "",
           "legendFormat": "Consumed - {{event_type}}",
           "refId": "B"
@@ -162,7 +162,7 @@
           "refId": "A"
         },
         {
-          "expr": "sum(consumer_service_events_consumed_total)",
+          "expr": "sum(consumer_events_consumed_total)",
           "interval": "",
           "legendFormat": "Total Consumed",
           "refId": "B"
@@ -263,7 +263,7 @@
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.95, rate(consumer_service_processing_duration_seconds_bucket[5m]))",
+          "expr": "histogram_quantile(0.95, rate(consumer_processing_duration_seconds_bucket[5m]))",
           "interval": "",
           "legendFormat": "Consumer p95",
           "refId": "B"
@@ -344,15 +344,15 @@
       },
       "targets": [
         {
-          "expr": "consumer_service_active_workers",
+          "expr": "consumer_kafka_reader_stats{metric=\"messages\"}",
           "interval": "",
-          "legendFormat": "Active Workers",
+          "legendFormat": "Messages Processed",
           "refId": "A"
         },
         {
-          "expr": "consumer_service_kafka_connections",
+          "expr": "consumer_kafka_reader_stats{metric=\"errors\"}",
           "interval": "",
-          "legendFormat": "Kafka Connections",
+          "legendFormat": "Kafka Errors",
           "refId": "B"
         }
       ],
@@ -451,7 +451,7 @@
           "refId": "A"
         },
         {
-          "expr": "rate(consumer_service_events_failed_total[5m])",
+          "expr": "rate(consumer_events_failed_total[5m])",
           "interval": "",
           "legendFormat": "Consumer Failed - {{event_type}} ({{reason}})",
           "refId": "B"

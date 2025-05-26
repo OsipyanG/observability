@@ -4,12 +4,15 @@
 *.dll
 *.so
 *.dylib
+server
 
 # Test binary, built with `go test -c`
 *.test
 
 # Output of the go coverage tool, specifically when used with LiteIDE
 *.out
+coverage.html
+coverage.out
 
 # Dependency directories (remove the comment below to include it)
 # vendor/
@@ -17,14 +20,19 @@
 # Go workspace file
 go.work
 
-# IDE
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# IDE files
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
 
-# OS
+# OS generated files
 .DS_Store
 .DS_Store?
 ._*
@@ -43,23 +51,18 @@ pids
 *.seed
 *.pid.lock
 
-# Coverage directory used by tools like istanbul
-coverage/
-*.lcov
-coverage.out
-coverage.html
-
 # Build artifacts
-consumer
-consumer-service
 dist/
 build/
-
-# Environment variables
-.env
-.env.local
-.env.*.local
+bin/
 
 # Temporary files
 tmp/
-temp/ 
+temp/
+
+# Air (hot reload) files
+tmp/
+.air.toml
+
+# Docker
+.dockerignore 

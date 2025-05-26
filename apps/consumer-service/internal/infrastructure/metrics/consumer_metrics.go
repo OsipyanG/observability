@@ -7,217 +7,103 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
-// ConsumerMetrics содержит все метрики для consumer сервиса
+// ConsumerMetrics содержит метрики для consumer
 type ConsumerMetrics struct {
-	// Счетчики событий
-	eventsConsumed *prometheus.CounterVec
-	eventsFailed   *prometheus.CounterVec
-
-	// Метрики времени обработки
+	consumedEvents     *prometheus.CounterVec
+	failedEvents       *prometheus.CounterVec
 	processingDuration *prometheus.HistogramVec
-
-	// Метрики батчей
-	batchSize        *prometheus.HistogramVec
-	batchProcessTime *prometheus.HistogramVec
-
-	// Метрики воркеров
-	activeWorkers prometheus.Gauge
-
-	// Метрики Kafka
-	kafkaLag         *prometheus.GaugeVec
-	kafkaOffset      *prometheus.GaugeVec
-	kafkaConnections prometheus.Gauge
-
-	// Метрики ошибок
-	retryAttempts *prometheus.CounterVec
-	deadLetters   *prometheus.CounterVec
-
-	// Метрики производительности
-	throughput *prometheus.GaugeVec
+	lagGauge           *prometheus.GaugeVec
+	commitDuration     prometheus.Histogram
+	batchSize          prometheus.Histogram
+	kafkaReaderStats   *prometheus.GaugeVec
 }
 
-// NewConsumerMetrics создает новый экземпляр метрик
-func NewConsumerMetrics(namespace, subsystem string) *ConsumerMetrics {
+// NewConsumerMetrics создает новые метрики для consumer
+func NewConsumerMetrics() *ConsumerMetrics {
 	return &ConsumerMetrics{
-		eventsConsumed: promauto.NewCounterVec(
+		consumedEvents: promauto.NewCounterVec(
 			prometheus.CounterOpts{
-				Namespace: namespace,
-				Subsystem: subsystem,
-				Name:      "events_consumed_total",
-				Help:      "Total number of events consumed",
+				Name: "consumer_events_consumed_total",
+				Help: "Total number of events consumed",
 			},
-			[]string{"event_type", "topic", "partition"},
+			[]string{"event_type"},
 		),
-
-		eventsFailed: promauto.NewCounterVec(
+		failedEvents: promauto.NewCounterVec(
 			prometheus.CounterOpts{
-				Namespace: namespace,
-				Subsystem: subsystem,
-				Name:      "events_failed_total",
-				Help:      "Total number of failed events",
-			},
-			[]string{"event_type", "reason", "topic", "partition"},
-		),
-
-		processingDuration: promauto.NewHistogramVec(
-			prometheus.HistogramOpts{
-				Namespace: namespace,
-				Subsystem: subsystem,
-				Name:      "processing_duration_seconds",
-				Help:      "Time spent processing events",
-				Buckets:   prometheus.ExponentialBuckets(0.001, 2, 15), // 1ms to ~32s
-			},
-			[]string{"event_type", "status"},
-		),
-
-		batchSize: promauto.NewHistogramVec(
-			prometheus.HistogramOpts{
-				Namespace: namespace,
-				Subsystem: subsystem,
-				Name:      "batch_size",
-				Help:      "Size of processed batches",
-				Buckets:   prometheus.LinearBuckets(1, 10, 20), // 1 to 200
-			},
-			[]string{"topic"},
-		),
-
-		batchProcessTime: promauto.NewHistogramVec(
-			prometheus.HistogramOpts{
-				Namespace: namespace,
-				Subsystem: subsystem,
-				Name:      "batch_process_duration_seconds",
-				Help:      "Time spent processing batches",
-				Buckets:   prometheus.ExponentialBuckets(0.01, 2, 12), // 10ms to ~40s
-			},
-			[]string{"topic"},
-		),
-
-		activeWorkers: promauto.NewGauge(
-			prometheus.GaugeOpts{
-				Namespace: namespace,
-				Subsystem: subsystem,
-				Name:      "active_workers",
-				Help:      "Number of active worker goroutines",
-			},
-		),
-
-		kafkaLag: promauto.NewGaugeVec(
-			prometheus.GaugeOpts{
-				Namespace: namespace,
-				Subsystem: subsystem,
-				Name:      "kafka_lag",
-				Help:      "Kafka consumer lag",
-			},
-			[]string{"topic", "partition", "group_id"},
-		),
-
-		kafkaOffset: promauto.NewGaugeVec(
-			prometheus.GaugeOpts{
-				Namespace: namespace,
-				Subsystem: subsystem,
-				Name:      "kafka_offset",
-				Help:      "Current Kafka offset",
-			},
-			[]string{"topic", "partition", "group_id"},
-		),
-
-		kafkaConnections: promauto.NewGauge(
-			prometheus.GaugeOpts{
-				Namespace: namespace,
-				Subsystem: subsystem,
-				Name:      "kafka_connections",
-				Help:      "Number of active Kafka connections",
-			},
-		),
-
-		retryAttempts: promauto.NewCounterVec(
-			prometheus.CounterOpts{
-				Namespace: namespace,
-				Subsystem: subsystem,
-				Name:      "retry_attempts_total",
-				Help:      "Total number of retry attempts",
-			},
-			[]string{"event_type", "attempt"},
-		),
-
-		deadLetters: promauto.NewCounterVec(
-			prometheus.CounterOpts{
-				Namespace: namespace,
-				Subsystem: subsystem,
-				Name:      "dead_letters_total",
-				Help:      "Total number of events sent to dead letter queue",
+				Name: "consumer_events_failed_total",
+				Help: "Total number of failed events",
 			},
 			[]string{"event_type", "reason"},
 		),
-
-		throughput: promauto.NewGaugeVec(
-			prometheus.GaugeOpts{
-				Namespace: namespace,
-				Subsystem: subsystem,
-				Name:      "throughput_events_per_second",
-				Help:      "Current throughput in events per second",
+		processingDuration: promauto.NewHistogramVec(
+			prometheus.HistogramOpts{
+				Name:    "consumer_processing_duration_seconds",
+				Help:    "Duration of event processing",
+				Buckets: prometheus.DefBuckets,
 			},
 			[]string{"event_type"},
+		),
+		lagGauge: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "consumer_lag",
+				Help: "Consumer lag in messages",
+			},
+			[]string{"topic", "partition"},
+		),
+		commitDuration: promauto.NewHistogram(
+			prometheus.HistogramOpts{
+				Name:    "consumer_commit_duration_seconds",
+				Help:    "Duration of offset commits",
+				Buckets: []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0},
+			},
+		),
+		batchSize: promauto.NewHistogram(
+			prometheus.HistogramOpts{
+				Name:    "consumer_batch_size",
+				Help:    "Size of consumed message batches",
+				Buckets: []float64{1, 5, 10, 25, 50, 100, 250, 500, 1000},
+			},
+		),
+		kafkaReaderStats: promauto.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "consumer_kafka_reader_stats",
+				Help: "Kafka reader statistics",
+			},
+			[]string{"metric"},
 		),
 	}
 }
 
-// IncEventsConsumed увеличивает счетчик потребленных событий
-func (m *ConsumerMetrics) IncEventsConsumed(eventType, topic, partition string) {
-	m.eventsConsumed.WithLabelValues(eventType, topic, partition).Inc()
+// IncConsumedEvents увеличивает счетчик потребленных событий
+func (m *ConsumerMetrics) IncConsumedEvents(eventType string) {
+	m.consumedEvents.WithLabelValues(eventType).Inc()
 }
 
-// IncEventsFailed увеличивает счетчик неудачных событий
-func (m *ConsumerMetrics) IncEventsFailed(eventType, reason, topic, partition string) {
-	m.eventsFailed.WithLabelValues(eventType, reason, topic, partition).Inc()
+// IncFailedEvents увеличивает счетчик неудачных событий
+func (m *ConsumerMetrics) IncFailedEvents(eventType string, reason string) {
+	m.failedEvents.WithLabelValues(eventType, reason).Inc()
 }
 
 // ObserveProcessingDuration записывает время обработки события
-func (m *ConsumerMetrics) ObserveProcessingDuration(eventType, status string, duration time.Duration) {
-	m.processingDuration.WithLabelValues(eventType, status).Observe(duration.Seconds())
+func (m *ConsumerMetrics) ObserveProcessingDuration(eventType string, duration time.Duration) {
+	m.processingDuration.WithLabelValues(eventType).Observe(duration.Seconds())
 }
 
-// ObserveBatchSize записывает размер батча
-func (m *ConsumerMetrics) ObserveBatchSize(topic string, size int) {
-	m.batchSize.WithLabelValues(topic).Observe(float64(size))
+// ObserveCommitDuration записывает время коммита offset
+func (m *ConsumerMetrics) ObserveCommitDuration(duration time.Duration) {
+	m.commitDuration.Observe(duration.Seconds())
 }
 
-// ObserveBatchProcessTime записывает время обработки батча
-func (m *ConsumerMetrics) ObserveBatchProcessTime(topic string, duration time.Duration) {
-	m.batchProcessTime.WithLabelValues(topic).Observe(duration.Seconds())
+// ObserveBatchSize записывает размер batch
+func (m *ConsumerMetrics) ObserveBatchSize(size int) {
+	m.batchSize.Observe(float64(size))
 }
 
-// SetActiveWorkers устанавливает количество активных воркеров
-func (m *ConsumerMetrics) SetActiveWorkers(count int) {
-	m.activeWorkers.Set(float64(count))
-}
-
-// SetKafkaLag устанавливает lag для Kafka
-func (m *ConsumerMetrics) SetKafkaLag(topic, partition, groupID string, lag int64) {
-	m.kafkaLag.WithLabelValues(topic, partition, groupID).Set(float64(lag))
-}
-
-// SetKafkaOffset устанавливает текущий offset для Kafka
-func (m *ConsumerMetrics) SetKafkaOffset(topic, partition, groupID string, offset int64) {
-	m.kafkaOffset.WithLabelValues(topic, partition, groupID).Set(float64(offset))
-}
-
-// SetKafkaConnections устанавливает количество активных соединений с Kafka
-func (m *ConsumerMetrics) SetKafkaConnections(count int) {
-	m.kafkaConnections.Set(float64(count))
-}
-
-// IncRetryAttempts увеличивает счетчик попыток повтора
-func (m *ConsumerMetrics) IncRetryAttempts(eventType, attempt string) {
-	m.retryAttempts.WithLabelValues(eventType, attempt).Inc()
-}
-
-// IncDeadLetters увеличивает счетчик событий в dead letter queue
-func (m *ConsumerMetrics) IncDeadLetters(eventType, reason string) {
-	m.deadLetters.WithLabelValues(eventType, reason).Inc()
-}
-
-// SetThroughput устанавливает текущую пропускную способность
-func (m *ConsumerMetrics) SetThroughput(eventType string, eventsPerSecond float64) {
-	m.throughput.WithLabelValues(eventType).Set(eventsPerSecond)
+// UpdateKafkaReaderStats обновляет статистику Kafka reader
+func (m *ConsumerMetrics) UpdateKafkaReaderStats(messages, bytes, rebalances, timeouts, errors int64) {
+	m.kafkaReaderStats.WithLabelValues("messages").Set(float64(messages))
+	m.kafkaReaderStats.WithLabelValues("bytes").Set(float64(bytes))
+	m.kafkaReaderStats.WithLabelValues("rebalances").Set(float64(rebalances))
+	m.kafkaReaderStats.WithLabelValues("timeouts").Set(float64(timeouts))
+	m.kafkaReaderStats.WithLabelValues("errors").Set(float64(errors))
 }

@@ -3,53 +3,68 @@ package kafka
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"consumer-service/internal/config"
 	"consumer-service/internal/domain"
-	"consumer-service/internal/infrastructure/metrics"
 
 	"github.com/segmentio/kafka-go"
+	"github.com/sirupsen/logrus"
 )
 
-// Consumer реализует интерфейс EventConsumer
+// ConsumerMetrics интерфейс для метрик consumer
+type ConsumerMetrics interface {
+	IncConsumedEvents(eventType string)
+	IncFailedEvents(eventType string, reason string)
+	ObserveProcessingDuration(eventType string, duration time.Duration)
+	ObserveCommitDuration(duration time.Duration)
+	ObserveBatchSize(size int)
+	UpdateKafkaReaderStats(messages, bytes, rebalances, timeouts, errors int64)
+}
+
+// EventProcessor интерфейс для обработки событий
+type EventProcessor interface {
+	ProcessEvent(ctx context.Context, event *domain.Event) error
+}
+
+// Consumer реализует Kafka consumer
 type Consumer struct {
-	reader  *kafka.Reader
-	handler domain.EventHandler
-	logger  domain.Logger
-	metrics *metrics.ConsumerMetrics
-	config  config.KafkaConfig
-
-	// Статистика
-	stats      domain.ConsumerStats
-	statsMutex sync.RWMutex
-
-	// Управление жизненным циклом
-	ctx    context.Context
-	cancel context.CancelFunc
-	wg     sync.WaitGroup
-	closed int32
-
-	// Каналы для координации
-	eventChan  chan *kafka.Message
-	resultChan chan *domain.ProcessingResult
-
-	// Настройки retry
-	retryBackoff time.Duration
-	maxRetries   int
+	reader    *kafka.Reader
+	processor EventProcessor
+	logger    *logrus.Logger
+	metrics   ConsumerMetrics
+	config    config.KafkaConfig
+	mu        sync.RWMutex
+	closed    bool
+	wg        sync.WaitGroup
 }
 
 // NewConsumer создает новый Kafka consumer
-func NewConsumer(
-	cfg config.KafkaConfig,
-	handler domain.EventHandler,
-	logger domain.Logger,
-	metrics *metrics.ConsumerMetrics,
-) *Consumer {
-	// Создаем reader с расширенными настройками
+func NewConsumer(cfg config.KafkaConfig, processor EventProcessor, logger *logrus.Logger, metrics ConsumerMetrics) (*Consumer, error) {
+	if len(cfg.Brokers) == 0 {
+		return nil, fmt.Errorf("kafka brokers not configured")
+	}
+
+	if cfg.Topic == "" {
+		return nil, fmt.Errorf("kafka topic not configured")
+	}
+
+	if cfg.GroupID == "" {
+		return nil, fmt.Errorf("kafka group ID not configured")
+	}
+
+	// Определяем начальный offset
+	var startOffset int64
+	switch cfg.StartOffset {
+	case "earliest":
+		startOffset = kafka.FirstOffset
+	case "latest":
+		startOffset = kafka.LastOffset
+	default:
+		startOffset = kafka.LastOffset
+	}
+
 	reader := kafka.NewReader(kafka.ReaderConfig{
 		Brokers:        cfg.Brokers,
 		Topic:          cfg.Topic,
@@ -57,272 +72,198 @@ func NewConsumer(
 		MinBytes:       cfg.MinBytes,
 		MaxBytes:       cfg.MaxBytes,
 		MaxWait:        cfg.MaxWait,
-		StartOffset:    cfg.StartOffset,
 		CommitInterval: cfg.CommitInterval,
-
-		// Настройки производительности
-		ReadBatchTimeout: cfg.MaxWaitTime,
-
-		// Настройки retry
-		ReadBackoffMin: cfg.RetryBackoff,
-		ReadBackoffMax: cfg.RetryBackoff * 10,
-
-		// Логирование ошибок
-		ErrorLogger: kafka.LoggerFunc(func(msg string, args ...interface{}) {
-			logger.Error(fmt.Sprintf("kafka reader error: "+msg, args...))
-		}),
+		StartOffset:    startOffset,
+		ErrorLogger:    kafka.LoggerFunc(logger.Errorf),
 	})
 
-	ctx, cancel := context.WithCancel(context.Background())
-
-	return &Consumer{
-		reader:  reader,
-		handler: handler,
-		logger:  logger,
-		metrics: metrics,
-		config:  cfg,
-		ctx:     ctx,
-		cancel:  cancel,
-
-		eventChan:  make(chan *kafka.Message, 1000),
-		resultChan: make(chan *domain.ProcessingResult, 1000),
-
-		retryBackoff: cfg.RetryBackoff,
-		maxRetries:   cfg.MaxRetries,
-
-		stats: domain.ConsumerStats{
-			LastMessageTime: time.Now(),
-		},
+	consumer := &Consumer{
+		reader:    reader,
+		processor: processor,
+		logger:    logger,
+		metrics:   metrics,
+		config:    cfg,
 	}
+
+	logger.WithFields(logrus.Fields{
+		"brokers":  cfg.Brokers,
+		"topic":    cfg.Topic,
+		"group_id": cfg.GroupID,
+	}).Info("Kafka consumer initialized")
+
+	return consumer, nil
 }
 
-// Consume начинает потребление сообщений
-func (c *Consumer) Consume(ctx context.Context) error {
-	if atomic.LoadInt32(&c.closed) == 1 {
+// Start запускает consumer
+func (c *Consumer) Start(ctx context.Context) error {
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
 		return fmt.Errorf("consumer is closed")
 	}
+	c.mu.Unlock()
 
 	c.logger.Info("Starting Kafka consumer")
 
-	// Запускаем воркеры для обработки
-	workerCount := 5 // можно сделать конфигурируемым
-	for i := 0; i < workerCount; i++ {
-		c.wg.Add(1)
-		go c.worker(i)
-	}
-
-	// Запускаем сборщик результатов
+	// Запускаем горутину для сбора статистики
 	c.wg.Add(1)
-	go c.resultCollector()
+	go c.collectStats(ctx)
 
-	// Запускаем обновление метрик
-	c.wg.Add(1)
-	go c.metricsUpdater()
-
-	// Основной цикл чтения сообщений
-	defer func() {
-		close(c.eventChan)
-		c.wg.Wait()
-		close(c.resultChan)
-	}()
-
+	// Основной цикл потребления
 	for {
 		select {
 		case <-ctx.Done():
 			c.logger.Info("Consumer context cancelled, stopping")
 			return ctx.Err()
-		case <-c.ctx.Done():
-			c.logger.Info("Consumer stopped")
-			return nil
 		default:
-			if err := c.readMessage(ctx); err != nil {
-				c.logger.Error("Failed to read message", "error", err)
-				c.updateErrorStats("read_error")
-
-				// Небольшая пауза при ошибке чтения
-				select {
-				case <-time.After(c.retryBackoff):
-				case <-ctx.Done():
-					return ctx.Err()
+			if err := c.consumeMessage(ctx); err != nil {
+				if err == context.Canceled || err == context.DeadlineExceeded {
+					return err
 				}
-				continue
+				c.logger.WithError(err).Error("Error consuming message")
+				// Небольшая пауза перед повтором
+				time.Sleep(c.config.RetryBackoff)
 			}
 		}
 	}
 }
 
-// ConsumeBatch потребляет события батчами
-func (c *Consumer) ConsumeBatch(ctx context.Context, batchSize int) ([]*domain.Event, error) {
-	if atomic.LoadInt32(&c.closed) == 1 {
-		return nil, fmt.Errorf("consumer is closed")
+// consumeMessage потребляет одно сообщение
+func (c *Consumer) consumeMessage(ctx context.Context) error {
+	c.mu.RLock()
+	if c.closed {
+		c.mu.RUnlock()
+		return fmt.Errorf("consumer is closed")
 	}
+	reader := c.reader
+	c.mu.RUnlock()
 
-	var events []*domain.Event
-	timeout := time.After(c.config.MaxWait)
-
-	for len(events) < batchSize {
-		select {
-		case <-ctx.Done():
-			return events, ctx.Err()
-		case <-timeout:
-			// Возвращаем то, что успели собрать
-			return events, nil
-		default:
-			message, err := c.reader.ReadMessage(ctx)
-			if err != nil {
-				if len(events) > 0 {
-					return events, nil
-				}
-				return nil, fmt.Errorf("failed to read message: %w", err)
-			}
-
-			event, err := c.parseMessage(&message)
-			if err != nil {
-				c.logger.Error("Failed to parse message", "error", err)
-				c.updateErrorStats("parse_error")
-				continue
-			}
-
-			events = append(events, event)
-			c.updateConsumedStats(event, &message)
-		}
-	}
-
-	return events, nil
-}
-
-// readMessage читает одно сообщение и отправляет в канал для обработки
-func (c *Consumer) readMessage(ctx context.Context) error {
-	message, err := c.reader.ReadMessage(ctx)
+	// Читаем сообщение с таймаутом
+	message, err := reader.FetchMessage(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to read message: %w", err)
+		return fmt.Errorf("failed to fetch message: %w", err)
 	}
 
-	// Обновляем метрики соединений
-	c.metrics.SetKafkaConnections(1) // упрощенно, в реальности нужно отслеживать
-
-	select {
-	case c.eventChan <- &message:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-time.After(5 * time.Second):
-		return fmt.Errorf("timeout sending message to processing channel")
-	}
-}
-
-// worker обрабатывает сообщения из канала
-func (c *Consumer) worker(workerID int) {
-	defer c.wg.Done()
-
-	c.logger.Debug("Starting worker", "worker_id", workerID)
-	c.metrics.SetActiveWorkers(workerID + 1)
-
-	defer func() {
-		c.metrics.SetActiveWorkers(workerID)
-		c.logger.Debug("Worker stopped", "worker_id", workerID)
-	}()
-
-	for message := range c.eventChan {
-		result := c.processMessage(message)
-
-		select {
-		case c.resultChan <- result:
-		case <-c.ctx.Done():
-			return
-		}
-	}
-}
-
-// processMessage обрабатывает одно сообщение
-func (c *Consumer) processMessage(message *kafka.Message) *domain.ProcessingResult {
 	start := time.Now()
 
-	result := &domain.ProcessingResult{
-		ProcessedAt: start,
-	}
-
 	// Парсим событие
-	event, err := c.parseMessage(message)
-	if err != nil {
-		result.Success = false
-		result.Error = fmt.Sprintf("parse error: %v", err)
-		result.Duration = time.Since(start)
-		c.updateErrorStats("parse_error")
-		return result
-	}
-
-	result.EventID = event.ID
-	result.EventType = event.Type
-
-	// Обрабатываем с retry логикой
-	for attempt := 0; attempt <= c.maxRetries; attempt++ {
-		processResult, err := c.handler.Handle(c.ctx, event)
-		if err == nil && processResult != nil && processResult.Success {
-			result.Success = true
-			result.Duration = time.Since(start)
-			c.updateSuccessStats(event, message)
-			c.metrics.ObserveProcessingDuration(string(event.Type), "success", result.Duration)
-			return result
-		}
-
-		// Логируем попытку retry
-		if attempt < c.maxRetries {
-			c.logger.Warn("Retrying event processing",
-				"event_id", event.ID,
-				"attempt", attempt+1,
-				"error", err)
-			c.metrics.IncRetryAttempts(string(event.Type), strconv.Itoa(attempt+1))
-
-			// Exponential backoff
-			backoff := c.retryBackoff * time.Duration(1<<attempt)
-			time.Sleep(backoff)
-		} else {
-			// Исчерпали все попытки
-			result.Success = false
-			result.Error = fmt.Sprintf("max retries exceeded: %v", err)
-			result.Duration = time.Since(start)
-			c.updateErrorStats("max_retries_exceeded")
-			c.metrics.IncDeadLetters(string(event.Type), "max_retries")
-			c.metrics.ObserveProcessingDuration(string(event.Type), "failed", result.Duration)
-		}
-	}
-
-	return result
-}
-
-// parseMessage парсит Kafka сообщение в доменное событие
-func (c *Consumer) parseMessage(message *kafka.Message) (*domain.Event, error) {
 	event, err := domain.FromJSON(message.Value)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse event from JSON: %w", err)
-	}
+		c.metrics.IncFailedEvents("unknown", "parse_error")
+		c.logger.WithFields(logrus.Fields{
+			"offset":    message.Offset,
+			"partition": message.Partition,
+			"error":     err,
+		}).Error("Failed to parse event")
 
-	return event, nil
-}
-
-// resultCollector собирает результаты обработки
-func (c *Consumer) resultCollector() {
-	defer c.wg.Done()
-
-	for result := range c.resultChan {
-		if result.Success {
-			c.logger.Debug("Event processed successfully",
-				"event_id", result.EventID,
-				"event_type", result.EventType,
-				"duration", result.Duration)
-		} else {
-			c.logger.Error("Event processing failed",
-				"event_id", result.EventID,
-				"event_type", result.EventType,
-				"error", result.Error,
-				"duration", result.Duration)
+		// Коммитим сообщение даже если не смогли его распарсить
+		if commitErr := c.commitMessage(ctx, message); commitErr != nil {
+			c.logger.WithError(commitErr).Error("Failed to commit message after parse error")
 		}
+		return nil
 	}
+
+	// Валидируем событие
+	if err := event.Validate(); err != nil {
+		c.metrics.IncFailedEvents(string(event.Type), "validation_error")
+		c.logger.WithFields(logrus.Fields{
+			"event_id":   event.ID,
+			"event_type": event.Type,
+			"error":      err,
+		}).Error("Event validation failed")
+
+		// Коммитим невалидное сообщение
+		if commitErr := c.commitMessage(ctx, message); commitErr != nil {
+			c.logger.WithError(commitErr).Error("Failed to commit message after validation error")
+		}
+		return nil
+	}
+
+	// Обрабатываем событие с retry логикой
+	if err := c.processEventWithRetry(ctx, event); err != nil {
+		c.metrics.IncFailedEvents(string(event.Type), "processing_error")
+		c.logger.WithFields(logrus.Fields{
+			"event_id":   event.ID,
+			"event_type": event.Type,
+			"error":      err,
+		}).Error("Failed to process event")
+		return err
+	}
+
+	// Коммитим успешно обработанное сообщение
+	if err := c.commitMessage(ctx, message); err != nil {
+		c.logger.WithError(err).Error("Failed to commit message")
+		return err
+	}
+
+	// Записываем метрики
+	duration := time.Since(start)
+	c.metrics.IncConsumedEvents(string(event.Type))
+	c.metrics.ObserveProcessingDuration(string(event.Type), duration)
+
+	c.logger.WithFields(logrus.Fields{
+		"event_id":   event.ID,
+		"event_type": event.Type,
+		"duration":   duration,
+		"offset":     message.Offset,
+		"partition":  message.Partition,
+	}).Debug("Event processed successfully")
+
+	return nil
 }
 
-// metricsUpdater периодически обновляет метрики
-func (c *Consumer) metricsUpdater() {
+// processEventWithRetry обрабатывает событие с retry логикой
+func (c *Consumer) processEventWithRetry(ctx context.Context, event *domain.Event) error {
+	var lastErr error
+
+	for attempt := 0; attempt <= c.config.MaxRetries; attempt++ {
+		if attempt > 0 {
+			// Экспоненциальная задержка
+			backoff := time.Duration(attempt) * c.config.RetryBackoff
+			c.logger.WithFields(logrus.Fields{
+				"event_id": event.ID,
+				"attempt":  attempt,
+				"backoff":  backoff,
+			}).Warn("Retrying event processing")
+
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(backoff):
+			}
+		}
+
+		if err := c.processor.ProcessEvent(ctx, event); err != nil {
+			lastErr = err
+			continue
+		}
+
+		return nil
+	}
+
+	return fmt.Errorf("failed to process event after %d attempts: %w", c.config.MaxRetries, lastErr)
+}
+
+// commitMessage коммитит сообщение
+func (c *Consumer) commitMessage(ctx context.Context, message kafka.Message) error {
+	start := time.Now()
+	defer func() {
+		c.metrics.ObserveCommitDuration(time.Since(start))
+	}()
+
+	c.mu.RLock()
+	reader := c.reader
+	c.mu.RUnlock()
+
+	if err := reader.CommitMessages(ctx, message); err != nil {
+		return fmt.Errorf("failed to commit message: %w", err)
+	}
+
+	return nil
+}
+
+// collectStats собирает статистику Kafka reader
+func (c *Consumer) collectStats(ctx context.Context) {
 	defer c.wg.Done()
 
 	ticker := time.NewTicker(30 * time.Second)
@@ -330,84 +271,47 @@ func (c *Consumer) metricsUpdater() {
 
 	for {
 		select {
-		case <-ticker.C:
-			c.updateKafkaMetrics()
-		case <-c.ctx.Done():
+		case <-ctx.Done():
 			return
+		case <-ticker.C:
+			c.mu.RLock()
+			if c.closed {
+				c.mu.RUnlock()
+				return
+			}
+			stats := c.reader.Stats()
+			c.mu.RUnlock()
+
+			c.metrics.UpdateKafkaReaderStats(
+				stats.Messages,
+				stats.Bytes,
+				stats.Rebalances,
+				stats.Timeouts,
+				stats.Errors,
+			)
 		}
-	}
-}
-
-// updateKafkaMetrics обновляет метрики Kafka
-func (c *Consumer) updateKafkaMetrics() {
-	stats := c.reader.Stats()
-
-	// Обновляем основные метрики
-	c.metrics.SetKafkaOffset(stats.Topic, stats.Partition, c.config.GroupID, stats.Offset)
-	c.metrics.SetKafkaLag(stats.Topic, stats.Partition, c.config.GroupID, stats.Lag)
-}
-
-// updateConsumedStats обновляет статистику потребленных сообщений
-func (c *Consumer) updateConsumedStats(event *domain.Event, message *kafka.Message) {
-	c.statsMutex.Lock()
-	defer c.statsMutex.Unlock()
-
-	c.stats.MessagesConsumed++
-	c.stats.BytesConsumed += int64(len(message.Value))
-	c.stats.LastMessageTime = time.Now()
-
-	partitionStr := strconv.Itoa(message.Partition)
-	c.metrics.IncEventsConsumed(string(event.Type), message.Topic, partitionStr)
-}
-
-// updateSuccessStats обновляет статистику успешной обработки
-func (c *Consumer) updateSuccessStats(event *domain.Event, message *kafka.Message) {
-	c.updateConsumedStats(event, message)
-}
-
-// updateErrorStats обновляет статистику ошибок
-func (c *Consumer) updateErrorStats(reason string) {
-	c.statsMutex.Lock()
-	defer c.statsMutex.Unlock()
-
-	c.stats.Errors++
-}
-
-// Stats возвращает статистику consumer
-func (c *Consumer) Stats() domain.ConsumerStats {
-	c.statsMutex.RLock()
-	defer c.statsMutex.RUnlock()
-
-	// Создаем копию для безопасности
-	return domain.ConsumerStats{
-		MessagesConsumed: c.stats.MessagesConsumed,
-		BytesConsumed:    c.stats.BytesConsumed,
-		Errors:           c.stats.Errors,
-		LastMessageTime:  c.stats.LastMessageTime,
-		Lag:              c.stats.Lag, // можно получить из Kafka метрик
 	}
 }
 
 // Close закрывает consumer
 func (c *Consumer) Close() error {
-	if !atomic.CompareAndSwapInt32(&c.closed, 0, 1) {
-		return nil // уже закрыт
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.closed {
+		return nil
 	}
 
+	c.closed = true
 	c.logger.Info("Closing Kafka consumer")
 
-	// Отменяем контекст
-	c.cancel()
-
-	// Ждем завершения всех горутин
+	// Ждем завершения горутин
 	c.wg.Wait()
 
-	// Закрываем reader
 	if err := c.reader.Close(); err != nil {
-		c.logger.Error("Failed to close Kafka reader", "error", err)
 		return fmt.Errorf("failed to close kafka reader: %w", err)
 	}
 
-	c.logger.Info("Kafka consumer closed successfully")
+	c.logger.Info("Kafka consumer closed")
 	return nil
 }

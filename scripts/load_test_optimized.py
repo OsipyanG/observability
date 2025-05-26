@@ -24,30 +24,13 @@ class User(HttpUser):
     
     @task(3)
     def create_user_event(self):
-        """Create user events - 30% of requests"""
+        """Create user events - 80% of requests"""
         payload = {
             "data": f"User {random.randint(1000, 9999)} registered"
         }
-        self.client.post("/api/v1/events/user-created", json=payload)
-    
-    @task(2)
-    def create_order_event(self):
-        """Create order events - 20% of requests"""
-        payload = {
-            "data": f"Order #{random.randint(10000, 99999)} placed for ${random.randint(10, 500)}"
-        }
-        self.client.post("/api/v1/events/order-placed", json=payload)
-    
-    @task(2)
-    def create_payment_event(self):
-        """Create payment events - 20% of requests"""
-        payment_methods = ["credit_card", "paypal", "bank_transfer"]
-        payload = {
-            "data": f"Payment ${random.randint(10, 500)} via {random.choice(payment_methods)}"
-        }
-        self.client.post("/api/v1/events/payment-processed", json=payload)
+        self.client.post("/api/v1/events/user", json=payload)
     
     @task(3)
     def health_check(self):
-        """Health check requests - 30% of requests"""
+        """Health check requests - 20% of requests"""
         self.client.get("/health") 

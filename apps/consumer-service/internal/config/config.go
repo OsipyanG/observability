@@ -12,205 +12,95 @@ import (
 
 // Config содержит конфигурацию приложения
 type Config struct {
-	App      AppConfig      `validate:"required"`
-	Server   ServerConfig   `validate:"required"`
-	Kafka    KafkaConfig    `validate:"required"`
-	Consumer ConsumerConfig `validate:"required"`
-	Metrics  MetricsConfig  `validate:"required"`
-	Logging  LoggingConfig  `validate:"required"`
-	Health   HealthConfig   `validate:"required"`
+	Kafka   KafkaConfig   `validate:"required"`
+	Logging LoggingConfig `validate:"required"`
+	Metrics MetricsConfig `validate:"required"`
+	App     AppConfig     `validate:"required"`
 }
 
-// AppConfig общие настройки приложения
-type AppConfig struct {
-	Name        string `validate:"required,min=1"`
-	Version     string `validate:"required,min=1"`
-	Environment string `validate:"required,oneof=development staging production"`
-	Debug       bool
-}
-
-// ServerConfig настройки HTTP сервера
-type ServerConfig struct {
-	Address      string        `validate:"required"`
-	ReadTimeout  time.Duration `validate:"min=1s"`
-	WriteTimeout time.Duration `validate:"min=1s"`
-	IdleTimeout  time.Duration `validate:"min=1s"`
-}
-
-// KafkaConfig содержит конфигурацию Kafka
+// KafkaConfig содержит конфигурацию Kafka consumer
 type KafkaConfig struct {
-	Brokers        []string      `validate:"required,min=1"`
-	Topic          string        `validate:"required,min=1"`
-	GroupID        string        `validate:"required,min=1"`
-	MinBytes       int           `validate:"min=1"`
-	MaxBytes       int           `validate:"min=1024"`
-	MaxWait        time.Duration `validate:"min=100ms"`
-	StartOffset    int64         `validate:"oneof=-2 -1"`
-	CommitInterval time.Duration `validate:"min=100ms"`
-
-	// Настройки безопасности
-	SecurityProtocol string
-	SASLMechanism    string
-	SASLUsername     string
-	SASLPassword     string
-
-	// Настройки производительности
-	FetchMin     int           `validate:"min=1"`
-	FetchMax     int           `validate:"min=1024"`
-	FetchDefault int           `validate:"min=1024"`
-	MaxWaitTime  time.Duration `validate:"min=100ms"`
-
-	// Настройки retry
-	RetryBackoff time.Duration `validate:"min=100ms"`
-	MaxRetries   int           `validate:"min=0"`
+	Brokers        []string      `validate:"required,min=1" env:"KAFKA_BROKER_LIST" default:"localhost:9092"`
+	Topic          string        `validate:"required,min=1" env:"KAFKA_TOPIC" default:"events"`
+	GroupID        string        `validate:"required" env:"KAFKA_GROUP_ID" default:"consumer-service"`
+	ClientID       string        `validate:"required" env:"KAFKA_CLIENT_ID" default:"consumer-service"`
+	MinBytes       int           `validate:"min=1" env:"KAFKA_MIN_BYTES" default:"10e3"`
+	MaxBytes       int           `validate:"min=1" env:"KAFKA_MAX_BYTES" default:"10e6"`
+	MaxWait        time.Duration `validate:"min=1ms" env:"KAFKA_MAX_WAIT" default:"1s"`
+	CommitInterval time.Duration `validate:"min=1ms" env:"KAFKA_COMMIT_INTERVAL" default:"1s"`
+	StartOffset    string        `validate:"oneof=earliest latest" env:"KAFKA_START_OFFSET" default:"latest"`
+	MaxRetries     int           `validate:"min=0,max=10" env:"KAFKA_MAX_RETRIES" default:"3"`
+	RetryBackoff   time.Duration `validate:"min=1ms,max=30s" env:"KAFKA_RETRY_BACKOFF" default:"100ms"`
 }
 
-// ConsumerConfig содержит конфигурацию consumer
-type ConsumerConfig struct {
-	WorkerCount     int           `validate:"min=1,max=100"`
-	BatchSize       int           `validate:"min=1,max=10000"`
-	ProcessTimeout  time.Duration `validate:"min=1s"`
-	RetryAttempts   int           `validate:"min=0,max=10"`
-	RetryDelay      time.Duration `validate:"min=100ms"`
-	RetryBackoffMax time.Duration `validate:"min=1s"`
-
-	// Настройки обработки
-	MaxConcurrency int           `validate:"min=1,max=1000"`
-	BufferSize     int           `validate:"min=1"`
-	FlushInterval  time.Duration `validate:"min=100ms"`
-
-	// Настройки graceful shutdown
-	ShutdownTimeout time.Duration `validate:"min=1s"`
-	DrainTimeout    time.Duration `validate:"min=1s"`
+// LoggingConfig содержит конфигурацию логирования
+type LoggingConfig struct {
+	Level  string `validate:"oneof=debug info warn error" env:"LOG_LEVEL" default:"info"`
+	Format string `validate:"oneof=json text" env:"LOG_FORMAT" default:"json"`
 }
 
 // MetricsConfig содержит конфигурацию метрик
 type MetricsConfig struct {
-	Enabled   bool   `validate:"required"`
-	Port      string `validate:"required"`
-	Path      string `validate:"required"`
-	Namespace string `validate:"required,min=1"`
-	Subsystem string `validate:"required,min=1"`
+	Enabled bool   `env:"METRICS_ENABLED" default:"true"`
+	Port    string `validate:"required" env:"METRICS_PORT" default:":9091"`
+	Path    string `validate:"required" env:"METRICS_PATH" default:"/metrics"`
 }
 
-// LoggingConfig настройки логирования
-type LoggingConfig struct {
-	Level      string `validate:"required,oneof=debug info warn error"`
-	Format     string `validate:"required,oneof=json text"`
-	Output     string `validate:"required,oneof=stdout stderr file"`
-	Filename   string
-	MaxSize    int `validate:"min=1"`
-	MaxBackups int `validate:"min=0"`
-	MaxAge     int `validate:"min=1"`
-	Compress   bool
+// AppConfig содержит общие настройки приложения
+type AppConfig struct {
+	Name        string `validate:"required" env:"APP_NAME" default:"consumer-service"`
+	Version     string `validate:"required" env:"APP_VERSION" default:"1.0.0"`
+	Environment string `validate:"oneof=development staging production" env:"APP_ENV" default:"development"`
+	Debug       bool   `env:"APP_DEBUG" default:"false"`
 }
 
-// HealthConfig настройки health checks
-type HealthConfig struct {
-	Enabled          bool          `validate:"required"`
-	CheckInterval    time.Duration `validate:"min=1s"`
-	Timeout          time.Duration `validate:"min=1s"`
-	FailureThreshold int           `validate:"min=1"`
-}
-
-// Load загружает конфигурацию из переменных окружения
+// Load загружает и валидирует конфигурацию из переменных окружения
 func Load() (*Config, error) {
 	config := &Config{
+		Kafka: KafkaConfig{
+			Brokers:        getBrokersEnv("KAFKA_BROKER_LIST", []string{"localhost:9092"}),
+			Topic:          getEnv("KAFKA_TOPIC", "events"),
+			GroupID:        getEnv("KAFKA_GROUP_ID", "consumer-service"),
+			ClientID:       getEnv("KAFKA_CLIENT_ID", "consumer-service"),
+			MinBytes:       getIntEnv("KAFKA_MIN_BYTES", 10e3),
+			MaxBytes:       getIntEnv("KAFKA_MAX_BYTES", 10e6),
+			MaxWait:        getDurationEnv("KAFKA_MAX_WAIT", 1*time.Second),
+			CommitInterval: getDurationEnv("KAFKA_COMMIT_INTERVAL", 1*time.Second),
+			StartOffset:    getEnv("KAFKA_START_OFFSET", "latest"),
+			MaxRetries:     getIntEnv("KAFKA_MAX_RETRIES", 3),
+			RetryBackoff:   getDurationEnv("KAFKA_RETRY_BACKOFF", 100*time.Millisecond),
+		},
+		Logging: LoggingConfig{
+			Level:  getEnv("LOG_LEVEL", "info"),
+			Format: getEnv("LOG_FORMAT", "json"),
+		},
+		Metrics: MetricsConfig{
+			Enabled: getBoolEnv("METRICS_ENABLED", true),
+			Port:    getEnv("METRICS_PORT", ":9091"),
+			Path:    getEnv("METRICS_PATH", "/metrics"),
+		},
 		App: AppConfig{
 			Name:        getEnv("APP_NAME", "consumer-service"),
 			Version:     getEnv("APP_VERSION", "1.0.0"),
 			Environment: getEnv("APP_ENV", "development"),
 			Debug:       getBoolEnv("APP_DEBUG", false),
 		},
-		Server: ServerConfig{
-			Address:      getEnv("SERVER_ADDRESS", ":8080"),
-			ReadTimeout:  getDurationEnv("SERVER_READ_TIMEOUT", 15*time.Second),
-			WriteTimeout: getDurationEnv("SERVER_WRITE_TIMEOUT", 15*time.Second),
-			IdleTimeout:  getDurationEnv("SERVER_IDLE_TIMEOUT", 60*time.Second),
-		},
-		Kafka: KafkaConfig{
-			Brokers:          getBrokersEnv("KAFKA_BROKER_LIST", []string{"localhost:9092"}),
-			Topic:            getEnv("KAFKA_TOPIC", "events"),
-			GroupID:          getEnv("KAFKA_GROUP_ID", "consumer-service"),
-			MinBytes:         getIntEnv("KAFKA_MIN_BYTES", 1),
-			MaxBytes:         getIntEnv("KAFKA_MAX_BYTES", 10485760), // 10MB
-			MaxWait:          getDurationEnv("KAFKA_MAX_WAIT", 1*time.Second),
-			StartOffset:      getInt64Env("KAFKA_START_OFFSET", -1), // latest
-			CommitInterval:   getDurationEnv("KAFKA_COMMIT_INTERVAL", 1*time.Second),
-			SecurityProtocol: getEnv("KAFKA_SECURITY_PROTOCOL", "PLAINTEXT"),
-			SASLMechanism:    getEnv("KAFKA_SASL_MECHANISM", ""),
-			SASLUsername:     getEnv("KAFKA_SASL_USERNAME", ""),
-			SASLPassword:     getEnv("KAFKA_SASL_PASSWORD", ""),
-			FetchMin:         getIntEnv("KAFKA_FETCH_MIN", 1),
-			FetchMax:         getIntEnv("KAFKA_FETCH_MAX", 1048576),     // 1MB
-			FetchDefault:     getIntEnv("KAFKA_FETCH_DEFAULT", 1048576), // 1MB
-			MaxWaitTime:      getDurationEnv("KAFKA_MAX_WAIT_TIME", 500*time.Millisecond),
-			RetryBackoff:     getDurationEnv("KAFKA_RETRY_BACKOFF", 100*time.Millisecond),
-			MaxRetries:       getIntEnv("KAFKA_MAX_RETRIES", 3),
-		},
-		Consumer: ConsumerConfig{
-			WorkerCount:     getIntEnv("CONSUMER_WORKER_COUNT", 5),
-			BatchSize:       getIntEnv("CONSUMER_BATCH_SIZE", 100),
-			ProcessTimeout:  getDurationEnv("CONSUMER_PROCESS_TIMEOUT", 30*time.Second),
-			RetryAttempts:   getIntEnv("CONSUMER_RETRY_ATTEMPTS", 3),
-			RetryDelay:      getDurationEnv("CONSUMER_RETRY_DELAY", 1*time.Second),
-			RetryBackoffMax: getDurationEnv("CONSUMER_RETRY_BACKOFF_MAX", 30*time.Second),
-			MaxConcurrency:  getIntEnv("CONSUMER_MAX_CONCURRENCY", 10),
-			BufferSize:      getIntEnv("CONSUMER_BUFFER_SIZE", 1000),
-			FlushInterval:   getDurationEnv("CONSUMER_FLUSH_INTERVAL", 5*time.Second),
-			ShutdownTimeout: getDurationEnv("CONSUMER_SHUTDOWN_TIMEOUT", 30*time.Second),
-			DrainTimeout:    getDurationEnv("CONSUMER_DRAIN_TIMEOUT", 10*time.Second),
-		},
-		Metrics: MetricsConfig{
-			Enabled:   getBoolEnv("METRICS_ENABLED", true),
-			Port:      getEnv("METRICS_PORT", ":9090"),
-			Path:      getEnv("METRICS_PATH", "/metrics"),
-			Namespace: getEnv("METRICS_NAMESPACE", "consumer"),
-			Subsystem: getEnv("METRICS_SUBSYSTEM", "service"),
-		},
-		Logging: LoggingConfig{
-			Level:      getEnv("LOG_LEVEL", "info"),
-			Format:     getEnv("LOG_FORMAT", "json"),
-			Output:     getEnv("LOG_OUTPUT", "stdout"),
-			Filename:   getEnv("LOG_FILENAME", "consumer-service.log"),
-			MaxSize:    getIntEnv("LOG_MAX_SIZE", 100), // MB
-			MaxBackups: getIntEnv("LOG_MAX_BACKUPS", 3),
-			MaxAge:     getIntEnv("LOG_MAX_AGE", 28), // days
-			Compress:   getBoolEnv("LOG_COMPRESS", true),
-		},
-		Health: HealthConfig{
-			Enabled:          getBoolEnv("HEALTH_ENABLED", true),
-			CheckInterval:    getDurationEnv("HEALTH_CHECK_INTERVAL", 30*time.Second),
-			Timeout:          getDurationEnv("HEALTH_TIMEOUT", 5*time.Second),
-			FailureThreshold: getIntEnv("HEALTH_FAILURE_THRESHOLD", 3),
-		},
 	}
 
+	// Валидируем конфигурацию
 	if err := config.Validate(); err != nil {
-		return nil, fmt.Errorf("config validation failed: %w", err)
+		return nil, fmt.Errorf("invalid configuration: %w", err)
 	}
 
 	return config, nil
 }
 
-// Validate проверяет валидность конфигурации
+// Validate валидирует конфигурацию
 func (c *Config) Validate() error {
 	validate := validator.New()
 	if err := validate.Struct(c); err != nil {
-		return fmt.Errorf("validation failed: %w", err)
+		return fmt.Errorf("configuration validation failed: %w", err)
 	}
-
-	// Дополнительные проверки
-	if c.Consumer.WorkerCount > c.Consumer.MaxConcurrency {
-		return fmt.Errorf("worker count (%d) cannot exceed max concurrency (%d)",
-			c.Consumer.WorkerCount, c.Consumer.MaxConcurrency)
-	}
-
-	if c.Kafka.MaxBytes < c.Kafka.MinBytes {
-		return fmt.Errorf("kafka max bytes (%d) cannot be less than min bytes (%d)",
-			c.Kafka.MaxBytes, c.Kafka.MinBytes)
-	}
-
 	return nil
 }
 
@@ -224,12 +114,13 @@ func (c *Config) IsDevelopment() bool {
 	return c.App.Environment == "development"
 }
 
-// GetKafkaBrokerString возвращает строку с брокерами Kafka
-func (c *Config) GetKafkaBrokerString() string {
-	return strings.Join(c.Kafka.Brokers, ",")
+// GetKafkaBrokerAddresses возвращает адреса брокеров Kafka
+func (c *Config) GetKafkaBrokerAddresses() []string {
+	return c.Kafka.Brokers
 }
 
-// Helper functions
+// Вспомогательные функции для получения переменных окружения
+
 func getEnv(key, defaultValue string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
@@ -240,15 +131,6 @@ func getEnv(key, defaultValue string) string {
 func getIntEnv(key string, defaultValue int) int {
 	if value := os.Getenv(key); value != "" {
 		if intValue, err := strconv.Atoi(value); err == nil {
-			return intValue
-		}
-	}
-	return defaultValue
-}
-
-func getInt64Env(key string, defaultValue int64) int64 {
-	if value := os.Getenv(key); value != "" {
-		if intValue, err := strconv.ParseInt(value, 10, 64); err == nil {
 			return intValue
 		}
 	}
@@ -269,7 +151,6 @@ func getDurationEnv(key string, defaultValue time.Duration) time.Duration {
 		if duration, err := time.ParseDuration(value); err == nil {
 			return duration
 		}
-		// Fallback: try parsing as seconds
 		if seconds, err := strconv.Atoi(value); err == nil {
 			return time.Duration(seconds) * time.Second
 		}
@@ -280,7 +161,7 @@ func getDurationEnv(key string, defaultValue time.Duration) time.Duration {
 func getBrokersEnv(key string, defaultValue []string) []string {
 	if value := os.Getenv(key); value != "" {
 		brokers := strings.Split(value, ",")
-		// Trim whitespace from each broker
+		// Очищаем пробелы
 		for i, broker := range brokers {
 			brokers[i] = strings.TrimSpace(broker)
 		}

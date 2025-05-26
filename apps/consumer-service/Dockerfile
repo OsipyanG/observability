@@ -1,54 +1,51 @@
-# Multi-stage build для оптимизации размера образа
-FROM golang:1.21-alpine AS builder
+# Build stage
+FROM golang:1.24.2-alpine AS builder
 
-# Устанавливаем необходимые пакеты
-RUN apk add --no-cache git ca-certificates tzdata
+# Install git and ca-certificates
+RUN apk add --no-cache git ca-certificates
 
-# Создаем пользователя для безопасности
-RUN adduser -D -g '' appuser
+# Set working directory
+WORKDIR /app
 
-# Устанавливаем рабочую директорию
-WORKDIR /build
-
-# Копируем go mod файлы для кэширования зависимостей
+# Copy go mod files
 COPY go.mod go.sum ./
 
-# Загружаем зависимости
+# Download dependencies
 RUN go mod download
 
-# Копируем исходный код
+# Copy source code
 COPY . .
 
-# Сборка приложения с оптимизацией
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
-    -ldflags='-w -s -extldflags "-static"' \
-    -a -installsuffix cgo \
-    -o consumer-service ./cmd/server
+# Build the application
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o server ./cmd/server
 
-# Финальный образ
-FROM scratch
+# Final stage
+FROM alpine:latest
 
-# Копируем CA сертификаты для HTTPS
-COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
+# Install ca-certificates for HTTPS requests
+RUN apk --no-cache add ca-certificates
 
-# Копируем timezone данные
-COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
+# Create non-root user
+RUN addgroup -g 1001 -S appgroup && \
+    adduser -u 1001 -S appuser -G appgroup
 
-# Копируем пользователя
-COPY --from=builder /etc/passwd /etc/passwd
+WORKDIR /root/
 
-# Копируем скомпилированное приложение
-COPY --from=builder /build/consumer-service /consumer-service
+# Copy the binary from builder stage
+COPY --from=builder /app/server .
 
-# Используем непривилегированного пользователя
+# Change ownership to non-root user
+RUN chown appuser:appgroup server
+
+# Switch to non-root user
 USER appuser
 
-# Открываем порты
-EXPOSE 8080 9090
+# Expose metrics port
+EXPOSE 9091
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD ["/consumer-service", "-health-check"]
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:9091/metrics || exit 1
 
-# Запускаем приложение
-ENTRYPOINT ["/consumer-service"] 
+# Run the application
+CMD ["./server"] 
