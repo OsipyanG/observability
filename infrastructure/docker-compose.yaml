@@ -2,32 +2,32 @@
 networks:
   monitoring:
     driver: bridge
-    name: diploma-monitoring
+    name: project-monitoring
   kafka-net:
     driver: bridge
-    name: diploma-kafka
+    name: project-kafka
   app-net:
     driver: bridge
-    name: diploma-app
+    name: project-app
 
 # Именованные volumes для персистентности данных
 volumes:
   kafka-data:
-    name: diploma-kafka-data
+    name: project-kafka-data
   zookeeper-data:
-    name: diploma-zookeeper-data
+    name: project-zookeeper-data
   zookeeper-logs:
-    name: diploma-zookeeper-logs
+    name: project-zookeeper-logs
   prometheus-data:
-    name: diploma-prometheus-data
+    name: project-prometheus-data
   grafana-data:
-    name: diploma-grafana-data
+    name: project-grafana-data
 
 services:
   # Zookeeper - необходим для Kafka
   zookeeper:
     image: confluentinc/cp-zookeeper:7.6.0
-    container_name: diploma-zookeeper
+    container_name: project-zookeeper
     restart: unless-stopped
     networks:
       - kafka-net
@@ -50,7 +50,7 @@ services:
   # Kafka - основной брокер сообщений
   kafka:
     image: confluentinc/cp-kafka:7.6.0
-    container_name: diploma-kafka
+    container_name: project-kafka
     restart: unless-stopped
     networks:
       - kafka-net
@@ -102,14 +102,14 @@ services:
   # Kafka UI - веб-интерфейс для управления Kafka
   kafka-ui:
     image: provectuslabs/kafka-ui:latest
-    container_name: diploma-kafka-ui
+    container_name: project-kafka-ui
     restart: unless-stopped
     networks:
       - kafka-net
     ports:
       - "8080:8080"
     environment:
-      KAFKA_CLUSTERS_0_NAME: diploma-cluster
+      KAFKA_CLUSTERS_0_NAME: project-cluster
       KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
       KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
       DYNAMIC_CONFIG_ENABLED: "true"
@@ -121,7 +121,7 @@ services:
   # Prometheus - система мониторинга
   prometheus:
     image: prom/prometheus:v2.52.0
-    container_name: diploma-prometheus
+    container_name: project-prometheus
     restart: unless-stopped
     networks:
       - monitoring
@@ -151,7 +151,7 @@ services:
   # Alertmanager - управление алертами
   alertmanager:
     image: prom/alertmanager:v0.27.0
-    container_name: diploma-alertmanager
+    container_name: project-alertmanager
     restart: unless-stopped
     networks:
       - monitoring
@@ -171,7 +171,7 @@ services:
   # Grafana - визуализация метрик
   grafana:
     image: grafana/grafana:11.0.0
-    container_name: diploma-grafana
+    container_name: project-grafana
     restart: unless-stopped
     networks:
       - monitoring
@@ -203,7 +203,7 @@ services:
   # Kafka Exporter - экспорт метрик Kafka в Prometheus
   kafka-exporter:
     image: danielqsj/kafka-exporter:v1.7.0
-    container_name: diploma-kafka-exporter
+    container_name: project-kafka-exporter
     restart: unless-stopped
     networks:
       - kafka-net
@@ -218,15 +218,15 @@ services:
       kafka:
         condition: service_healthy
 
-  # Наше Go приложение
-  sample-app:
+  # Producer Service - публикует события в Kafka
+  producer-service:
     build: 
-      context: ../apps/sample-app
+      context: ../apps/producer-service
       dockerfile: Dockerfile
       args:
         - GO_VERSION=1.21
-    image: diploma-sample-app:latest
-    container_name: diploma-sample-app
+    image: diploma-producer-service:latest
+    container_name: diploma-producer-service
     restart: unless-stopped
     networks:
       - kafka-net
@@ -252,6 +252,49 @@ services:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # Consumer Service - потребляет события из Kafka
+  consumer-service:
+    build: 
+      context: ../apps/consumer-service
+      dockerfile: Dockerfile
+    image: diploma-consumer-service:latest
+    container_name: diploma-consumer-service
+    restart: unless-stopped
+    networks:
+      - kafka-net
+      - monitoring
+      - app-net
+    ports:
+      - "9091:9090" 
+    environment:
+      # Kafka настройки
+      KAFKA_BROKER_LIST: kafka:29092
+      KAFKA_TOPIC: events
+      KAFKA_GROUP_ID: consumer-service
+      KAFKA_MIN_BYTES: 1
+      KAFKA_MAX_BYTES: 10485760  # 10MB
+      KAFKA_MAX_WAIT: 1s
+      KAFKA_START_OFFSET: -1  # latest
+      
+      # Consumer настройки
+      CONSUMER_WORKER_COUNT: 5
+      CONSUMER_BATCH_SIZE: 100
+      CONSUMER_PROCESS_TIMEOUT: 30s
+      CONSUMER_RETRY_ATTEMPTS: 3
+      CONSUMER_RETRY_DELAY: 1s
+      
+      # Логирование
+      LOG_LEVEL: info
+    depends_on:
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/health"]
       interval: 30s
       timeout: 10s
       retries: 3

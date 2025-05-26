@@ -12,10 +12,17 @@ alerting:
           - alertmanager:9093
 
 scrape_configs:
-  # Наше Go приложение
-  - job_name: 'sample-app'
+  # Producer Service - публикует события в Kafka
+  - job_name: 'producer-service'
     static_configs:
-      - targets: ['app:8080']
+      - targets: ['producer-service:9090']
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+
+  # Consumer Service
+  - job_name: 'consumer-service'
+    static_configs:
+      - targets: ['consumer-service:9090']
     metrics_path: '/metrics'
     scrape_interval: 10s
 
