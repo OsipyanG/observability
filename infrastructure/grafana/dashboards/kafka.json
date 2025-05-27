@@ -191,7 +191,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "kafka_topic_partitions",
+          "expr": "kafka_topic_partitions{topic!~\"__.*\"}",
           "interval": "",
           "legendFormat": "{{topic}} partitions",
           "refId": "A"
@@ -280,7 +280,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "kafka_topic_partition_current_offset",
+          "expr": "kafka_topic_partition_current_offset{topic!~\"__.*\"}",
           "interval": "",
           "legendFormat": "{{topic}}-{{partition}} offset",
           "refId": "A"
@@ -458,7 +458,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "rate(kafka_topic_partition_current_offset[5m])",
+          "expr": "rate(kafka_topic_partition_current_offset{topic!~\"__.*\"}[5m])",
           "interval": "",
           "legendFormat": "{{topic}}-{{partition}} rate",
           "refId": "A"
@@ -807,7 +807,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "count(count by (topic)(kafka_topic_partitions))",
+          "expr": "count(count by (topic)(kafka_topic_partitions{topic!~\"__.*\"}))",
           "interval": "",
           "legendFormat": "Topics Count",
           "refId": "A"

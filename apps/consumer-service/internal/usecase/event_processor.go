@@ -2,7 +2,6 @@ package usecase
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"consumer-service/internal/domain"
@@ -49,15 +48,10 @@ func (p *EventProcessor) ProcessEvent(ctx context.Context, event *domain.Event) 
 
 // processUserCreated обрабатывает событие создания пользователя
 func (p *EventProcessor) processUserCreated(ctx context.Context, event *domain.Event) error {
-	userData, err := event.GetUserData()
-	if err != nil {
-		return fmt.Errorf("failed to extract user data: %w", err)
-	}
-
 	p.logger.WithFields(logrus.Fields{
-		"user_id":  userData.UserID,
-		"username": userData.Username,
-		"email":    userData.Email,
+		"user_id":  event.ID,
+		"username": event.Data,
+		"email":    event.Data,
 	}).Info("User created event processed")
 
 	// Имитируем обработку

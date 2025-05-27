@@ -133,8 +133,16 @@ func setupLogger() *logrus.Logger {
 // startMetricsServer запускает отдельный сервер для метрик
 func startMetricsServer(cfg config.MetricsConfig, logger *logrus.Logger) {
 	metricsPath := "/metrics"
+	healthPath := "/health"
+
 	mux := http.NewServeMux()
 	mux.Handle(metricsPath, promhttp.Handler())
+
+	// Health check endpoint
+	mux.HandleFunc(healthPath, func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	})
 
 	srv := &http.Server{
 		Addr:    cfg.Port,
@@ -142,8 +150,9 @@ func startMetricsServer(cfg config.MetricsConfig, logger *logrus.Logger) {
 	}
 
 	logger.WithFields(logrus.Fields{
-		"address": cfg.Port,
-		"path":    metricsPath,
+		"address":      cfg.Port,
+		"metrics_path": metricsPath,
+		"health_path":  healthPath,
 	}).Info("Metrics server starting")
 
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {

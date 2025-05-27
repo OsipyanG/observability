@@ -147,7 +147,7 @@ func (c *Consumer) consumeMessage(ctx context.Context) error {
 	start := time.Now()
 
 	// Парсим событие
-	event, err := domain.FromJSON(message.Value)
+	event, err := domain.NewEvent(domain.UserCreatedEvent, string(message.Value))
 	if err != nil {
 		c.metrics.IncFailedEvents("unknown", "parse_error")
 		c.logger.WithFields(logrus.Fields{
