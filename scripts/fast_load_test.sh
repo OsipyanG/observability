@@ -1,11 +1,5 @@
 #!/bin/bash
 
-# Fast Load Test Script - 200 RPS for 5 minutes
-# Removed set -e to prevent early exit
-
-echo "🚀 Fast Load Test (200 RPS, 5 minutes)"
-echo "======================================"
-
 # Check if app is running
 echo "🔍 Checking if app is running..."
 if ! curl -s http://localhost:8081/health > /dev/null; then
@@ -33,19 +27,11 @@ if [[ ! -f "$LOCUST_FILE" ]]; then
 fi
 echo "📄 Locust file: $LOCUST_FILE"
 
-echo "✅ App is running"
-echo "🎯 Target: 200 RPS for 5 minutes"
-echo "👥 Users: 200 (optimized)"
-echo "⚡ Spawn rate: 20 users/sec"
-echo ""
 
 # Create results directory
 RESULTS_DIR="results_$(date +%Y%m%d_%H%M%S)"
 mkdir -p "$RESULTS_DIR"
 echo "📁 Results directory: $RESULTS_DIR"
-
-echo "📊 Starting load test..."
-echo "🔧 Command: locust --headless --users 200 --spawn-rate 20 --run-time 300s --host http://localhost:8081 --locustfile $LOCUST_FILE"
 
 # Run optimized test
 locust \

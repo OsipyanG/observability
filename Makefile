@@ -77,6 +77,21 @@ load-test: ## Запустить нагрузочное тестирование
 	@chmod +x $(SCRIPTS_DIR)/fast_load_test.sh
 	@$(SCRIPTS_DIR)/fast_load_test.sh
 
+extreme-load-test: ## Запустить экстремальное нагрузочное тестирование (максимальный RPS)
+	@echo "$(RED)Запуск экстремального нагрузочного тестирования...$(NC)"
+	@chmod +x $(SCRIPTS_DIR)/extreme_load_test.sh
+	@$(SCRIPTS_DIR)/extreme_load_test.sh
+
+optimize-macos: ## Оптимизировать macOS для максимального RPS
+	@echo "$(YELLOW)Оптимизация macOS...$(NC)"
+	@chmod +x $(SCRIPTS_DIR)/optimize_macos.sh
+	@$(SCRIPTS_DIR)/optimize_macos.sh
+
+profile-app: ## Профилировать приложение во время нагрузки
+	@echo "$(GREEN)Запуск профилирования приложения...$(NC)"
+	@chmod +x $(SCRIPTS_DIR)/profile_app.sh
+	@$(SCRIPTS_DIR)/profile_app.sh
+
 
 install-load-deps: ## Установить зависимости для нагрузочного тестирования
 	@echo "$(GREEN)Установка зависимостей для нагрузочного тестирования...$(NC)"

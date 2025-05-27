@@ -12,9 +12,6 @@ from locust import HttpUser, task, between
 class User(HttpUser):
     """Optimized user behavior for load testing"""
     
-    # Reduced wait time for higher RPS
-    wait_time = between(0.5, 1.5)
-    
     # Base URL for the application
     host = "http://localhost:8081"
     
@@ -26,11 +23,6 @@ class User(HttpUser):
     def create_user_event(self):
         """Create user events - 80% of requests"""
         payload = {
-            "data": f"User {random.randint(1000, 9999)} registered"
+            "data": f"User {random.randint(1, 1000000)} registered"
         }
         self.client.post("/api/v1/events/user", json=payload)
-    
-    @task(3)
-    def health_check(self):
-        """Health check requests - 20% of requests"""
-        self.client.get("/health") 
