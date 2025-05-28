@@ -56,3 +56,6 @@ prometheus-data/
 
 # Python
 __pycache__/
+
+results_*/
+.cursor/

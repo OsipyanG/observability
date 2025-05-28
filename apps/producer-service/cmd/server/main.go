@@ -36,6 +36,10 @@ func main() {
 		"environment": cfg.App.Environment,
 	}).Info("Starting producer service")
 
+	// Создаем контекст для приложения
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	// Инициализируем метрики
 	producerMetrics := metrics.NewProducerMetrics()
 	httpMetrics := metrics.NewHTTPMetrics()
@@ -50,6 +54,11 @@ func main() {
 			logger.WithError(err).Error("Failed to close Kafka producer")
 		}
 	}()
+
+	// Запускаем асинхронные worker'ы для батчинга
+	if err := kafkaProducer.Start(ctx); err != nil {
+		logger.WithError(err).Fatal("Failed to start Kafka producer workers")
+	}
 
 	// Инициализируем сервисы
 	eventService := usecase.NewEventService(kafkaProducer, logger)
@@ -105,12 +114,15 @@ func main() {
 
 	logger.Info("Shutting down server...")
 
+	// Отменяем контекст для остановки worker'ов
+	cancel()
+
 	// Создаем контекст с таймаутом для graceful shutdown
-	ctx, cancel := context.WithTimeout(context.Background(), cfg.Server.ShutdownTimeout)
-	defer cancel()
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), cfg.Server.ShutdownTimeout)
+	defer shutdownCancel()
 
 	// Останавливаем HTTP сервер
-	if err := srv.Shutdown(ctx); err != nil {
+	if err := srv.Shutdown(shutdownCtx); err != nil {
 		logger.WithError(err).Error("Server forced to shutdown")
 	}
 

@@ -77,14 +77,34 @@ services:
       
       # Настройки топиков
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
-      KAFKA_NUM_PARTITIONS: 1
+      KAFKA_NUM_PARTITIONS: 3           # Увеличено с 1 до 3 для параллелизма
       KAFKA_DEFAULT_REPLICATION_FACTOR: 1
+      
+      # Производительность - настройки для высокого throughput
+      KAFKA_SOCKET_SEND_BUFFER_BYTES: 102400
+      KAFKA_SOCKET_RECEIVE_BUFFER_BYTES: 102400
+      KAFKA_SOCKET_REQUEST_MAX_BYTES: 104857600
+      KAFKA_MESSAGE_MAX_BYTES: 10485760
+      KAFKA_REPLICA_FETCH_MAX_BYTES: 10485760
+      
+      # Настройки batch'инга для producer'ов
+      KAFKA_BATCH_SIZE: 16384
+      KAFKA_LINGER_MS: 5
+      
+      # Настройки flush для производительности
+      KAFKA_LOG_FLUSH_INTERVAL_MESSAGES: 10000
+      KAFKA_LOG_FLUSH_INTERVAL_MS: 1000
+      
+      # Настройки сегментов
+      KAFKA_LOG_SEGMENT_BYTES: 1073741824  # 1GB
+      KAFKA_LOG_RETENTION_HOURS: 168       # 7 дней
+      KAFKA_LOG_RETENTION_BYTES: 1073741824 # 1GB
       
       # JMX настройки для мониторинга
       KAFKA_JMX_PORT: 9101
       KAFKA_JMX_HOSTNAME: localhost
       
-      # Логирование
+      # Логирование - уменьшено для производительности
       KAFKA_LOG4J_ROOT_LOGLEVEL: WARN
       KAFKA_LOG4J_LOGGERS: "kafka.controller=INFO,kafka.producer.async.DefaultEventHandler=INFO,state.change.logger=INFO"
     volumes:
@@ -258,24 +278,27 @@ services:
     ports:
       - "9094:9090" 
     environment:
-      # Kafka настройки
+      # Kafka настройки - оптимизированы для высокой производительности
       KAFKA_BROKER_LIST: kafka:29092
       KAFKA_TOPIC: events
       KAFKA_GROUP_ID: consumer-service
-      KAFKA_MIN_BYTES: 1
-      KAFKA_MAX_BYTES: 10485760  # 10MB
-      KAFKA_MAX_WAIT: 1s
+      KAFKA_MIN_BYTES: 10000        # 10KB - больше данных за раз
+      KAFKA_MAX_BYTES: 10485760     # 10MB - максимальный размер batch'а
+      KAFKA_MAX_WAIT: 100ms         # Уменьшено с 1s до 100ms для быстрой реакции
+      KAFKA_COMMIT_INTERVAL: 5s     # Увеличено с 1s до 5s для batch коммитов
       KAFKA_START_OFFSET: latest
+      KAFKA_MAX_RETRIES: 3
+      KAFKA_RETRY_BACKOFF: 50ms     # Уменьшено с 100ms
       
-      # Consumer настройки
-      CONSUMER_WORKER_COUNT: 5
-      CONSUMER_BATCH_SIZE: 100
-      CONSUMER_PROCESS_TIMEOUT: 30s
+      # Consumer настройки - параллельная обработка
+      CONSUMER_WORKER_COUNT: 10     # Увеличено количество worker'ов
+      CONSUMER_BATCH_SIZE: 100      # Размер batch'а для коммитов
+      CONSUMER_PROCESS_TIMEOUT: 10s # Уменьшено с 30s
       CONSUMER_RETRY_ATTEMPTS: 3
-      CONSUMER_RETRY_DELAY: 1s
+      CONSUMER_RETRY_DELAY: 100ms   # Уменьшено с 1s
       
-      # Логирование
-      LOG_LEVEL: info
+      # Логирование - уменьшено для производительности
+      LOG_LEVEL: warn
     depends_on:
       kafka:
         condition: service_healthy

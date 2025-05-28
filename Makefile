@@ -20,9 +20,6 @@ up: ## Запустить всю инфраструктуру
 	cd infrastructure && docker-compose up -d
 	@echo "$(GREEN)Инфраструктура запущена!$(NC)"
 	@echo "$(YELLOW)Доступные сервисы:$(NC)"
-	@echo "  - Kafka UI:      http://localhost:8080"
-	@echo "  - Producer Service:    http://localhost:9091/metrics"
-	@echo "  - Consumer Service:    http://localhost:9094/metrics"
 	@echo "  - Prometheus:    http://localhost:9090"
 	@echo "  - Grafana:       http://localhost:3000 (admin/admin)"
 	@echo "  - Alertmanager:  http://localhost:9093"
@@ -40,7 +37,7 @@ down: ## Остановить всю инфраструктуру
 
 restart: down up ## Перезапустить инфраструктуру
 
-rebuild: clean up 
+rebuild: clean build-app up 
 
 logs: ## Показать логи всех сервисов
 	cd infrastructure && docker-compose logs -f

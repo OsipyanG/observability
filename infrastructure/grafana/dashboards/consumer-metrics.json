@@ -9,20 +9,6 @@
   "links": [],
   "panels": [
     {
-      "collapsed": false,
-      "datasource": null,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 9
-      },
-      "id": 6,
-      "panels": [],
-      "title": "Event Processing Analysis",
-      "type": "row"
-    },
-    {
       "datasource": "Prometheus",
       "fieldConfig": {
         "defaults": {
@@ -79,7 +65,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 10
+        "y": 8
       },
       "id": 7,
       "options": {
@@ -167,7 +153,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 10
+        "y": 8
       },
       "id": 8,
       "options": {
@@ -183,25 +169,25 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.50, rate(consumer_processing_duration_seconds_bucket[5m]))",
+          "expr": "histogram_quantile(0.50, sum(rate(consumer_processing_duration_seconds_bucket[5m])) by (le, event_type))",
           "interval": "",
           "legendFormat": "p50 - {{event_type}}",
           "refId": "A"
         },
         {
-          "expr": "histogram_quantile(0.90, rate(consumer_processing_duration_seconds_bucket[5m]))",
+          "expr": "histogram_quantile(0.90, sum(rate(consumer_processing_duration_seconds_bucket[5m])) by (le, event_type))",
           "interval": "",
           "legendFormat": "p90 - {{event_type}}",
           "refId": "B"
         },
         {
-          "expr": "histogram_quantile(0.95, rate(consumer_processing_duration_seconds_bucket[5m]))",
+          "expr": "histogram_quantile(0.95, sum(rate(consumer_processing_duration_seconds_bucket[5m])) by (le, event_type))",
           "interval": "",
           "legendFormat": "p95 - {{event_type}}",
           "refId": "C"
         },
         {
-          "expr": "histogram_quantile(0.99, rate(consumer_processing_duration_seconds_bucket[5m]))",
+          "expr": "histogram_quantile(0.99, sum(rate(consumer_processing_duration_seconds_bucket[5m])) by (le, event_type))",
           "interval": "",
           "legendFormat": "p99 - {{event_type}}",
           "refId": "D"
@@ -209,222 +195,6 @@
       ],
       "title": "Processing Duration Percentiles",
       "type": "timeseries"
-    },
-    {
-      "collapsed": false,
-      "datasource": null,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 18
-      },
-      "id": 9,
-      "panels": [],
-      "title": "Kafka Consumer Metrics",
-      "type": "row"
-    },
-    {
-      "datasource": "Prometheus",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "vis": false
-            },
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 8,
-        "y": 19
-      },
-      "id": 11,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "expr": "histogram_quantile(0.50, rate(consumer_batch_size_bucket[5m]))",
-          "interval": "",
-          "legendFormat": "p50 Batch Size",
-          "refId": "A"
-        },
-        {
-          "expr": "histogram_quantile(0.95, rate(consumer_batch_size_bucket[5m]))",
-          "interval": "",
-          "legendFormat": "p95 Batch Size",
-          "refId": "B"
-        },
-        {
-          "expr": "histogram_quantile(0.99, rate(consumer_batch_size_bucket[5m]))",
-          "interval": "",
-          "legendFormat": "p99 Batch Size",
-          "refId": "C"
-        }
-      ],
-      "title": "Batch Size Distribution",
-      "type": "timeseries"
-    },
-    {
-      "datasource": "Prometheus",
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "axisLabel": "",
-            "axisPlacement": "auto",
-            "barAlignment": 0,
-            "drawStyle": "line",
-            "fillOpacity": 10,
-            "gradientMode": "none",
-            "hideFrom": {
-              "legend": false,
-              "tooltip": false,
-              "vis": false
-            },
-            "lineInterpolation": "linear",
-            "lineWidth": 1,
-            "pointSize": 5,
-            "scaleDistribution": {
-              "type": "linear"
-            },
-            "showPoints": "never",
-            "spanNulls": false,
-            "stacking": {
-              "group": "A",
-              "mode": "none"
-            },
-            "thresholdsStyle": {
-              "mode": "off"
-            }
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 80
-              }
-            ]
-          },
-          "unit": "s"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 8,
-        "x": 16,
-        "y": 19
-      },
-      "id": 12,
-      "options": {
-        "legend": {
-          "calcs": [],
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "single",
-          "sort": "none"
-        }
-      },
-      "targets": [
-        {
-          "expr": "histogram_quantile(0.50, rate(consumer_commit_duration_seconds_bucket[5m]))",
-          "interval": "",
-          "legendFormat": "p50 Commit Duration",
-          "refId": "A"
-        },
-        {
-          "expr": "histogram_quantile(0.95, rate(consumer_commit_duration_seconds_bucket[5m]))",
-          "interval": "",
-          "legendFormat": "p95 Commit Duration",
-          "refId": "B"
-        },
-        {
-          "expr": "histogram_quantile(0.99, rate(consumer_commit_duration_seconds_bucket[5m]))",
-          "interval": "",
-          "legendFormat": "p99 Commit Duration",
-          "refId": "C"
-        }
-      ],
-      "title": "Offset Commit Duration",
-      "type": "timeseries"
-    },
-    {
-      "collapsed": false,
-      "datasource": null,
-      "gridPos": {
-        "h": 1,
-        "w": 24,
-        "x": 0,
-        "y": 27
-      },
-      "id": 13,
-      "panels": [],
-      "title": "Kafka Reader Statistics",
-      "type": "row"
     },
     {
       "datasource": "Prometheus",
@@ -483,7 +253,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 28
+        "y": 35
       },
       "id": 14,
       "options": {
@@ -501,13 +271,13 @@
         {
           "expr": "consumer_kafka_reader_stats{metric=\"messages\"}",
           "interval": "",
-          "legendFormat": "Messages Read",
+          "legendFormat": "Messages",
           "refId": "A"
         },
         {
           "expr": "consumer_kafka_reader_stats{metric=\"bytes\"}",
           "interval": "",
-          "legendFormat": "Bytes Read",
+          "legendFormat": "Bytes",
           "refId": "B"
         },
         {
@@ -517,7 +287,7 @@
           "refId": "C"
         }
       ],
-      "title": "Kafka Reader Operations",
+      "title": "Kafka Reader Stats",
       "type": "timeseries"
     },
     {
@@ -577,7 +347,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 28
+        "y": 35
       },
       "id": 15,
       "options": {
@@ -607,6 +377,128 @@
       ],
       "title": "Kafka Reader Errors & Timeouts",
       "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "datasource": null,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 25
+      },
+      "id": 9,
+      "panels": [],
+      "title": "Kafka Consumer Metrics",
+      "type": "row"
+    },
+    {
+      "datasource": "Prometheus",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisLabel": "",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 10,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "vis": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "never",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "off"
+            }
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 80
+              }
+            ]
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 26
+      },
+      "id": 12,
+      "options": {
+        "legend": {
+          "calcs": [],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.50, sum(rate(consumer_commit_duration_seconds_bucket[5m])) by (le))",
+          "interval": "",
+          "legendFormat": "p50 Commit Duration",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(consumer_commit_duration_seconds_bucket[5m])) by (le))",
+          "interval": "",
+          "legendFormat": "p95 Commit Duration",
+          "refId": "B"
+        },
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(consumer_commit_duration_seconds_bucket[5m])) by (le))",
+          "interval": "",
+          "legendFormat": "p99 Commit Duration",
+          "refId": "C"
+        }
+      ],
+      "title": "Offset Commit Duration",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "datasource": null,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 34
+      },
+      "id": 13,
+      "panels": [],
+      "title": "Kafka Reader Statistics",
+      "type": "row"
     }
   ],
   "refresh": "5s",

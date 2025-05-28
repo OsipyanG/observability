@@ -112,9 +112,13 @@ func (e *Event) Validate() error {
 	return nil
 }
 
-// ToJSON сериализует событие в JSON
-func (e *Event) ToJSON() ([]byte, error) {
-	return json.Marshal(e)
+// FromJSON преобразует JSON в Event
+func FromJSON(data []byte) (*Event, error) {
+	var event Event
+	if err := json.Unmarshal(data, &event); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal event: %w", err)
+	}
+	return &event, nil
 }
 
 // Clone создает копию события

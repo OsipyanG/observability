@@ -28,19 +28,29 @@ type EventProcessor interface {
 	ProcessEvent(ctx context.Context, event *domain.Event) error
 }
 
-// Consumer реализует Kafka consumer
-type Consumer struct {
-	reader    *kafka.Reader
-	processor EventProcessor
-	logger    *logrus.Logger
-	metrics   ConsumerMetrics
-	config    config.KafkaConfig
-	mu        sync.RWMutex
-	closed    bool
-	wg        sync.WaitGroup
+// MessageBatch представляет batch сообщений для обработки
+type MessageBatch struct {
+	Messages []kafka.Message
+	Events   []*domain.Event
 }
 
-// NewConsumer создает новый Kafka consumer
+// Consumer реализует Kafka consumer с поддержкой параллельной обработки
+type Consumer struct {
+	reader      *kafka.Reader
+	processor   EventProcessor
+	logger      *logrus.Logger
+	metrics     ConsumerMetrics
+	config      config.KafkaConfig
+	mu          sync.RWMutex
+	closed      bool
+	wg          sync.WaitGroup
+	workerCount int
+	batchSize   int
+	messageChan chan kafka.Message
+	commitChan  chan kafka.Message
+}
+
+// NewConsumer создает новый Kafka consumer с поддержкой параллельной обработки
 func NewConsumer(cfg config.KafkaConfig, processor EventProcessor, logger *logrus.Logger, metrics ConsumerMetrics) (*Consumer, error) {
 	if len(cfg.Brokers) == 0 {
 		return nil, fmt.Errorf("kafka brokers not configured")
@@ -77,24 +87,34 @@ func NewConsumer(cfg config.KafkaConfig, processor EventProcessor, logger *logru
 		ErrorLogger:    kafka.LoggerFunc(logger.Errorf),
 	})
 
+	// Настройки для параллельной обработки
+	workerCount := 10 // Количество worker'ов для обработки
+	batchSize := 100  // Размер batch'а для коммитов
+
 	consumer := &Consumer{
-		reader:    reader,
-		processor: processor,
-		logger:    logger,
-		metrics:   metrics,
-		config:    cfg,
+		reader:      reader,
+		processor:   processor,
+		logger:      logger,
+		metrics:     metrics,
+		config:      cfg,
+		workerCount: workerCount,
+		batchSize:   batchSize,
+		messageChan: make(chan kafka.Message, workerCount*2),
+		commitChan:  make(chan kafka.Message, batchSize*2),
 	}
 
 	logger.WithFields(logrus.Fields{
-		"brokers":  cfg.Brokers,
-		"topic":    cfg.Topic,
-		"group_id": cfg.GroupID,
-	}).Info("Kafka consumer initialized")
+		"brokers":      cfg.Brokers,
+		"topic":        cfg.Topic,
+		"group_id":     cfg.GroupID,
+		"worker_count": workerCount,
+		"batch_size":   batchSize,
+	}).Info("Kafka consumer initialized with parallel processing")
 
 	return consumer, nil
 }
 
-// Start запускает consumer
+// Start запускает consumer с параллельной обработкой
 func (c *Consumer) Start(ctx context.Context) error {
 	c.mu.Lock()
 	if c.closed {
@@ -103,51 +123,110 @@ func (c *Consumer) Start(ctx context.Context) error {
 	}
 	c.mu.Unlock()
 
-	c.logger.Info("Starting Kafka consumer")
+	c.logger.Info("Starting Kafka consumer with parallel processing")
 
 	// Запускаем горутину для сбора статистики
 	c.wg.Add(1)
 	go c.collectStats(ctx)
 
-	// Основной цикл потребления
+	// Запускаем worker'ы для обработки сообщений
+	for i := 0; i < c.workerCount; i++ {
+		c.wg.Add(1)
+		go c.messageWorker(ctx, i)
+	}
+
+	// Запускаем batch committer
+	c.wg.Add(1)
+	go c.batchCommitter(ctx)
+
+	// Основной цикл чтения сообщений
+	c.wg.Add(1)
+	go c.messageReader(ctx)
+
+	// Ждем завершения всех горутин
+	c.wg.Wait()
+	return nil
+}
+
+// messageReader читает сообщения из Kafka и отправляет их в канал для обработки
+func (c *Consumer) messageReader(ctx context.Context) {
+	defer c.wg.Done()
+	defer close(c.messageChan)
+
 	for {
 		select {
 		case <-ctx.Done():
-			c.logger.Info("Consumer context cancelled, stopping")
-			return ctx.Err()
+			c.logger.Info("Message reader context cancelled, stopping")
+			return
 		default:
-			if err := c.consumeMessage(ctx); err != nil {
+			c.mu.RLock()
+			if c.closed {
+				c.mu.RUnlock()
+				return
+			}
+			reader := c.reader
+			c.mu.RUnlock()
+
+			// Читаем сообщение с таймаутом
+			message, err := reader.FetchMessage(ctx)
+			if err != nil {
 				if err == context.Canceled || err == context.DeadlineExceeded {
-					return err
+					return
 				}
-				c.logger.WithError(err).Error("Error consuming message")
-				// Небольшая пауза перед повтором
+				c.logger.WithError(err).Error("Error fetching message")
 				time.Sleep(c.config.RetryBackoff)
+				continue
+			}
+
+			// Отправляем сообщение в канал для обработки
+			select {
+			case c.messageChan <- message:
+			case <-ctx.Done():
+				return
 			}
 		}
 	}
 }
 
-// consumeMessage потребляет одно сообщение
-func (c *Consumer) consumeMessage(ctx context.Context) error {
-	c.mu.RLock()
-	if c.closed {
-		c.mu.RUnlock()
-		return fmt.Errorf("consumer is closed")
-	}
-	reader := c.reader
-	c.mu.RUnlock()
+// messageWorker обрабатывает сообщения из канала
+func (c *Consumer) messageWorker(ctx context.Context, workerID int) {
+	defer c.wg.Done()
 
-	// Читаем сообщение с таймаутом
-	message, err := reader.FetchMessage(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to fetch message: %w", err)
-	}
+	logger := c.logger.WithField("worker_id", workerID)
+	logger.Info("Message worker started")
 
+	for {
+		select {
+		case <-ctx.Done():
+			logger.Info("Message worker context cancelled, stopping")
+			return
+		case message, ok := <-c.messageChan:
+			if !ok {
+				logger.Info("Message channel closed, stopping worker")
+				return
+			}
+
+			if err := c.processMessage(ctx, message); err != nil {
+				logger.WithError(err).Error("Failed to process message")
+				continue
+			}
+
+			// Отправляем сообщение для коммита
+			select {
+			case c.commitChan <- message:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}
+}
+
+// processMessage обрабатывает одно сообщение
+func (c *Consumer) processMessage(ctx context.Context, message kafka.Message) error {
 	start := time.Now()
 
-	// Парсим событие
-	event, err := domain.NewEvent(domain.UserCreatedEvent, string(message.Value))
+	// Парсим событие из JSON
+	event, err := domain.FromJSON(message.Value)
 	if err != nil {
 		c.metrics.IncFailedEvents("unknown", "parse_error")
 		c.logger.WithFields(logrus.Fields{
@@ -155,12 +234,7 @@ func (c *Consumer) consumeMessage(ctx context.Context) error {
 			"partition": message.Partition,
 			"error":     err,
 		}).Error("Failed to parse event")
-
-		// Коммитим сообщение даже если не смогли его распарсить
-		if commitErr := c.commitMessage(ctx, message); commitErr != nil {
-			c.logger.WithError(commitErr).Error("Failed to commit message after parse error")
-		}
-		return nil
+		return nil // Не возвращаем ошибку, чтобы не блокировать обработку
 	}
 
 	// Валидируем событие
@@ -171,12 +245,7 @@ func (c *Consumer) consumeMessage(ctx context.Context) error {
 			"event_type": event.Type,
 			"error":      err,
 		}).Error("Event validation failed")
-
-		// Коммитим невалидное сообщение
-		if commitErr := c.commitMessage(ctx, message); commitErr != nil {
-			c.logger.WithError(commitErr).Error("Failed to commit message after validation error")
-		}
-		return nil
+		return nil // Не возвращаем ошибку, чтобы не блокировать обработку
 	}
 
 	// Обрабатываем событие с retry логикой
@@ -187,12 +256,6 @@ func (c *Consumer) consumeMessage(ctx context.Context) error {
 			"event_type": event.Type,
 			"error":      err,
 		}).Error("Failed to process event")
-		return err
-	}
-
-	// Коммитим успешно обработанное сообщение
-	if err := c.commitMessage(ctx, message); err != nil {
-		c.logger.WithError(err).Error("Failed to commit message")
 		return err
 	}
 
@@ -210,6 +273,56 @@ func (c *Consumer) consumeMessage(ctx context.Context) error {
 	}).Debug("Event processed successfully")
 
 	return nil
+}
+
+// batchCommitter коммитит сообщения batch'ами
+func (c *Consumer) batchCommitter(ctx context.Context) {
+	defer c.wg.Done()
+	defer close(c.commitChan)
+
+	ticker := time.NewTicker(time.Second) // Коммитим каждую секунду
+	defer ticker.Stop()
+
+	var batch []kafka.Message
+	maxBatchSize := c.batchSize
+
+	commitBatch := func() {
+		if len(batch) == 0 {
+			return
+		}
+
+		start := time.Now()
+		if err := c.commitMessages(ctx, batch); err != nil {
+			c.logger.WithError(err).Error("Failed to commit message batch")
+		} else {
+			c.metrics.ObserveCommitDuration(time.Since(start))
+			c.metrics.ObserveBatchSize(len(batch))
+			c.logger.WithField("batch_size", len(batch)).Debug("Committed message batch")
+		}
+		batch = batch[:0] // Очищаем batch
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			c.logger.Info("Batch committer context cancelled, committing final batch")
+			commitBatch()
+			return
+		case <-ticker.C:
+			commitBatch()
+		case message, ok := <-c.commitChan:
+			if !ok {
+				c.logger.Info("Commit channel closed, committing final batch")
+				commitBatch()
+				return
+			}
+
+			batch = append(batch, message)
+			if len(batch) >= maxBatchSize {
+				commitBatch()
+			}
+		}
+	}
 }
 
 // processEventWithRetry обрабатывает событие с retry логикой
@@ -244,19 +357,14 @@ func (c *Consumer) processEventWithRetry(ctx context.Context, event *domain.Even
 	return fmt.Errorf("failed to process event after %d attempts: %w", c.config.MaxRetries, lastErr)
 }
 
-// commitMessage коммитит сообщение
-func (c *Consumer) commitMessage(ctx context.Context, message kafka.Message) error {
-	start := time.Now()
-	defer func() {
-		c.metrics.ObserveCommitDuration(time.Since(start))
-	}()
-
+// commitMessages коммитит batch сообщений
+func (c *Consumer) commitMessages(ctx context.Context, messages []kafka.Message) error {
 	c.mu.RLock()
 	reader := c.reader
 	c.mu.RUnlock()
 
-	if err := reader.CommitMessages(ctx, message); err != nil {
-		return fmt.Errorf("failed to commit message: %w", err)
+	if err := reader.CommitMessages(ctx, messages...); err != nil {
+		return fmt.Errorf("failed to commit messages: %w", err)
 	}
 
 	return nil

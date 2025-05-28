@@ -2,7 +2,6 @@ package usecase
 
 import (
 	"context"
-	"time"
 
 	"consumer-service/internal/domain"
 
@@ -28,7 +27,7 @@ func (p *EventProcessor) ProcessEvent(ctx context.Context, event *domain.Event) 
 		"event_type": event.Type,
 		"source":     event.Source,
 		"timestamp":  event.Timestamp,
-	}).Info("Processing event")
+	}).Debug("Processing event")
 
 	// Проверяем контекст
 	select {
@@ -52,14 +51,13 @@ func (p *EventProcessor) processUserCreated(ctx context.Context, event *domain.E
 		"user_id":  event.ID,
 		"username": event.Data,
 		"email":    event.Data,
-	}).Info("User created event processed")
+	}).Debug("User created event processed")
 
-	// Имитируем обработку
+	// Проверяем контекст перед обработкой
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case <-time.After(50 * time.Millisecond):
-		// Симуляция работы
+	default:
 	}
 
 	return nil
@@ -69,7 +67,7 @@ func (p *EventProcessor) processUserCreated(ctx context.Context, event *domain.E
 func (p *EventProcessor) processUnknownEvent(ctx context.Context, event *domain.Event) error {
 	p.logger.WithFields(logrus.Fields{
 		"event_type": event.Type,
-	}).Warn("Unknown event type, skipping processing")
+	}).Debug("Unknown event type, skipping processing")
 
 	// Для неизвестных событий просто логируем и считаем обработанными
 	return nil
