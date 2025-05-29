@@ -2,107 +2,68 @@ groups:
   - name: kafka_services
     rules:
       # Producer Service Alerts
-      - alert: ProducerHighFailureRate
-        expr: rate(producer_events_failed_total[5m]) / rate(producer_events_published_total[5m]) > 0.1
-        for: 2m
-        labels:
-          severity: warning
-          service: producer
-        annotations:
-          summary: "Producer service has high failure rate"
-          description: "Producer failure rate is {{ $value | humanizePercentage }} over the last 5 minutes"
-
-      - alert: ProducerSlowPublishing
-        expr: histogram_quantile(0.95, rate(producer_publish_duration_seconds_bucket[5m])) > 1
-        for: 3m
-        labels:
-          severity: warning
-          service: producer
-        annotations:
-          summary: "Producer service is slow"
-          description: "95th percentile publish duration is {{ $value }}s"
-
-      - alert: ProducerDown
+      - alert: ProducerServiceDown
         expr: up{job="producer-service"} == 0
         for: 1m
         labels:
           severity: critical
           service: producer
         annotations:
-          summary: "Producer service is down"
-          description: "Producer service has been down for more than 1 minute"
+          summary: "Producer Service недоступен"
+          description: "Producer Service не отвечает более 1 минуты"
 
-      # Consumer Service Alerts
-      - alert: ConsumerHighFailureRate
-        expr: rate(consumer_events_failed_total[5m]) / rate(consumer_events_consumed_total[5m]) > 0.1
+      - alert: ProducerHighErrorRate
+        expr: rate(producer_events_failed_total[5m]) / rate(producer_events_published_total[5m]) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+          service: producer
+        annotations:
+          summary: "Высокий процент ошибок в Producer Service"
+          description: "Процент ошибок превышает 5% за последние 5 минут"
+
+      - alert: ProducerHighLatency
+        expr: histogram_quantile(0.95, rate(producer_publish_duration_seconds_bucket[5m])) > 0.5
         for: 2m
         labels:
           severity: warning
-          service: consumer
+          service: producer
         annotations:
-          summary: "Consumer service has high failure rate"
-          description: "Consumer failure rate is {{ $value | humanizePercentage }} over the last 5 minutes"
+          summary: "Высокая латентность Producer Service"
+          description: "95-й перцентиль времени публикации превышает 500ms"
 
-      - alert: ConsumerSlowProcessing
-        expr: histogram_quantile(0.95, rate(consumer_processing_duration_seconds_bucket[5m])) > 5
-        for: 3m
-        labels:
-          severity: warning
-          service: consumer
-        annotations:
-          summary: "Consumer service is slow"
-          description: "95th percentile processing duration is {{ $value }}s"
-
-      - alert: ConsumerHighLag
-        expr: consumer_lag > 1000
-        for: 5m
-        labels:
-          severity: warning
-          service: consumer
-        annotations:
-          summary: "Consumer has high lag"
-          description: "Consumer lag is {{ $value }} messages on topic {{ $labels.topic }}"
-
-      - alert: ConsumerDown
+      # Consumer Service Alerts
+      - alert: ConsumerServiceDown
         expr: up{job="consumer-service"} == 0
         for: 1m
         labels:
           severity: critical
           service: consumer
         annotations:
-          summary: "Consumer service is down"
-          description: "Consumer service has been down for more than 1 minute"
+          summary: "Consumer Service недоступен"
+          description: "Consumer Service не отвечает более 1 минуты"
 
-      # HTTP Alerts
-      - alert: HighHTTPErrorRate
-        expr: rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m]) > 0.05
+      - alert: ConsumerLagHigh
+        expr: kafka_consumergroup_lag > 1000
+        for: 5m
+        labels:
+          severity: warning
+          service: consumer
+        annotations:
+          summary: "Большой лаг в Consumer Service"
+          description: "Лаг консьюмера превышает 1000 сообщений"
+
+      - alert: ConsumerHighErrorRate
+        expr: rate(consumer_events_failed_total[5m]) / rate(consumer_events_consumed_total[5m]) > 0.05
         for: 2m
         labels:
-          severity: warning
-        annotations:
-          summary: "High HTTP error rate"
-          description: "HTTP 5xx error rate is {{ $value | humanizePercentage }} for {{ $labels.job }}"
-
-      - alert: SlowHTTPRequests
-        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 2
-        for: 3m
-        labels:
-          severity: warning
-        annotations:
-          summary: "Slow HTTP requests"
-          description: "95th percentile HTTP request duration is {{ $value }}s for {{ $labels.job }}"
-
-      # Kafka Infrastructure Alerts
-      - alert: KafkaDown
-        expr: up{job="kafka-exporter"} == 0
-        for: 1m
-        labels:
           severity: critical
-          service: kafka
+          service: consumer
         annotations:
-          summary: "Kafka is down"
-          description: "Kafka has been down for more than 1 minute"
+          summary: "Высокий процент ошибок в Consumer Service"
+          description: "Процент ошибок превышает 5% за последние 5 минут"
 
+      # Kafka Alerts
       - alert: KafkaBrokerDown
         expr: kafka_brokers < 1
         for: 1m
@@ -110,35 +71,34 @@ groups:
           severity: critical
           service: kafka
         annotations:
-          summary: "Kafka broker is down"
-          description: "Number of active Kafka brokers is {{ $value }}"
+          summary: "Kafka брокер недоступен"
+          description: "Kafka брокер не отвечает"
 
-      - alert: KafkaHighConsumerLag
-        expr: kafka_consumergroup_lag > 1000
+      - alert: KafkaTopicLagHigh
+        expr: sum by(topic) (kafka_topic_partition_current_offset) - sum by(topic) (kafka_topic_partition_oldest_offset) > 10000
         for: 5m
         labels:
           severity: warning
           service: kafka
         annotations:
-          summary: "High consumer lag detected"
-          description: "Consumer group {{ $labels.consumergroup }} has lag of {{ $value }} on topic {{ $labels.topic }}"
+          summary: "Большой лаг в Kafka топике"
+          description: "Разница между текущим и старейшим офсетом превышает 10000"
 
-      - alert: KafkaTopicPartitionOffsetNotIncreasing
-        expr: increase(kafka_topic_partition_current_offset[10m]) == 0
-        for: 10m
+      # System Alerts
+      - alert: HighCPUUsage
+        expr: rate(process_cpu_seconds_total[5m]) > 0.8
+        for: 5m
         labels:
           severity: warning
-          service: kafka
         annotations:
-          summary: "Kafka topic partition offset not increasing"
-          description: "Topic {{ $labels.topic }} partition {{ $labels.partition }} offset has not increased in 10 minutes"
+          summary: "Высокая загрузка CPU"
+          description: "Использование CPU превышает 80% за последние 5 минут"
 
-      - alert: KafkaConsumerGroupMembersDown
-        expr: kafka_consumergroup_members == 0
-        for: 2m
+      - alert: HighMemoryUsage
+        expr: process_resident_memory_bytes / process_virtual_memory_bytes > 0.8
+        for: 5m
         labels:
           severity: warning
-          service: kafka
         annotations:
-          summary: "No active members in consumer group"
-          description: "Consumer group {{ $labels.consumergroup }} has no active members"
+          summary: "Высокое использование памяти"
+          description: "Использование памяти превышает 80% за последние 5 минут" 

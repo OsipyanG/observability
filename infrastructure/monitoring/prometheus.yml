@@ -25,7 +25,7 @@ scrape_configs:
     honor_labels: true
     metric_relabel_configs:
       - source_labels: [__name__]
-        regex: '(producer_.*|http_.*)'
+        regex: '(producer_.*|http_.*|go_.*|process_.*)'
         target_label: service
         replacement: 'producer'
 
@@ -39,7 +39,7 @@ scrape_configs:
     honor_labels: true
     metric_relabel_configs:
       - source_labels: [__name__]
-        regex: '(consumer_.*|http_.*)'
+        regex: '(consumer_.*|http_.*|go_.*|process_.*)'
         target_label: service
         replacement: 'consumer'
 
@@ -50,8 +50,36 @@ scrape_configs:
     scrape_interval: 30s
     scrape_timeout: 10s
 
+  # OpenTelemetry Collector метрики
+  - job_name: 'otel-collector'
+    static_configs:
+      - targets: ['otel-collector:8888', 'otel-collector:8889']
+    scrape_interval: 30s
+    scrape_timeout: 10s
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: 'otelcol_.*'
+        target_label: component
+        replacement: 'otel-collector'
+
   # Prometheus сам себя
   - job_name: 'prometheus'
     static_configs:
       - targets: ['localhost:9090']
     scrape_interval: 30s
+
+  # Loki метрики (если экспортирует)
+  - job_name: 'loki'
+    static_configs:
+      - targets: ['loki:3100']
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+    scrape_timeout: 10s
+
+  # Jaeger метрики (если экспортирует)
+  - job_name: 'jaeger'
+    static_configs:
+      - targets: ['jaeger:14269']
+    metrics_path: '/metrics'
+    scrape_interval: 30s
+    scrape_timeout: 10s

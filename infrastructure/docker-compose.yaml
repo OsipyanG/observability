@@ -1,4 +1,7 @@
-# Определяем сети для изоляции сервисов
+# =============================================================================
+# Diploma Project - Docker Compose Configuration
+# =============================================================================
+
 networks:
   monitoring:
     driver: bridge
@@ -10,7 +13,6 @@ networks:
     driver: bridge
     name: project-app
 
-# Именованные volumes для персистентности данных
 volumes:
   kafka-data:
     name: project-kafka-data
@@ -22,15 +24,21 @@ volumes:
     name: project-prometheus-data
   grafana-data:
     name: project-grafana-data
+  loki-data:
+    name: project-loki-data
+  jaeger-data:
+    name: project-jaeger-data
 
 services:
-  # Zookeeper - необходим для Kafka
+  # =============================================================================
+  # Infrastructure Services
+  # =============================================================================
+
   zookeeper:
     image: confluentinc/cp-zookeeper:7.6.0
     container_name: project-zookeeper
     restart: unless-stopped
-    networks:
-      - kafka-net
+    networks: [kafka-net]
     environment:
       ZOOKEEPER_CLIENT_PORT: 2181
       ZOOKEEPER_TICK_TIME: 2000
@@ -47,66 +55,42 @@ services:
       retries: 3
       start_period: 40s
 
-  # Kafka - основной брокер сообщений
   kafka:
     image: confluentinc/cp-kafka:7.6.0
     container_name: project-kafka
     restart: unless-stopped
-    networks:
-      - kafka-net
-      - monitoring
-      - app-net
+    networks: [kafka-net, monitoring, app-net]
     ports:
       - "9092:9092"
-      - "9101:9101"  # JMX port для мониторинга
+      - "9101:9101"
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      
-      # Настройки listeners
+      # Listeners
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
       KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
-      
-      # Настройки репликации для single-node setup
+      # Single-node configuration
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
-      
-      # Настройки топиков
+      # Topic defaults
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
-      KAFKA_NUM_PARTITIONS: 3           # Увеличено с 1 до 3 для параллелизма
+      KAFKA_NUM_PARTITIONS: 3
       KAFKA_DEFAULT_REPLICATION_FACTOR: 1
-      
-      # Производительность - настройки для высокого throughput
+      # Performance tuning
       KAFKA_SOCKET_SEND_BUFFER_BYTES: 102400
       KAFKA_SOCKET_RECEIVE_BUFFER_BYTES: 102400
-      KAFKA_SOCKET_REQUEST_MAX_BYTES: 104857600
       KAFKA_MESSAGE_MAX_BYTES: 10485760
-      KAFKA_REPLICA_FETCH_MAX_BYTES: 10485760
-      
-      # Настройки batch'инга для producer'ов
       KAFKA_BATCH_SIZE: 16384
       KAFKA_LINGER_MS: 5
-      
-      # Настройки flush для производительности
-      KAFKA_LOG_FLUSH_INTERVAL_MESSAGES: 10000
-      KAFKA_LOG_FLUSH_INTERVAL_MS: 1000
-      
-      # Настройки сегментов
-      KAFKA_LOG_SEGMENT_BYTES: 1073741824  # 1GB
-      KAFKA_LOG_RETENTION_HOURS: 168       # 7 дней
-      KAFKA_LOG_RETENTION_BYTES: 1073741824 # 1GB
-      
-      # JMX настройки для мониторинга
+      # JMX
       KAFKA_JMX_PORT: 9101
       KAFKA_JMX_HOSTNAME: localhost
-      
-      # Логирование - уменьшено для производительности
+      # Logging
       KAFKA_LOG4J_ROOT_LOGLEVEL: WARN
-      KAFKA_LOG4J_LOGGERS: "kafka.controller=INFO,kafka.producer.async.DefaultEventHandler=INFO,state.change.logger=INFO"
     volumes:
       - kafka-data:/var/lib/kafka/data
     depends_on:
@@ -119,26 +103,22 @@ services:
       retries: 5
       start_period: 60s
 
+  # =============================================================================
+  # Monitoring Services
+  # =============================================================================
 
-  # Prometheus - система мониторинга
   prometheus:
     image: prom/prometheus:v2.52.0
     container_name: project-prometheus
     restart: unless-stopped
-    networks:
-      - monitoring
-      - app-net
-    ports:
-      - "9090:9090"
+    networks: [monitoring, app-net]
+    ports: ["9090:9090"]
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
-      - '--web.console.libraries=/etc/prometheus/console_libraries'
-      - '--web.console.templates=/etc/prometheus/consoles'
       - '--storage.tsdb.retention.time=15d'
       - '--web.enable-lifecycle'
       - '--web.enable-admin-api'
-      - '--web.route-prefix=/'
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./monitoring/alert.rules.yml:/etc/prometheus/alert.rules.yml:ro
@@ -150,50 +130,35 @@ services:
       retries: 3
       start_period: 30s
 
-  # Alertmanager - управление алертами
   alertmanager:
     image: prom/alertmanager:v0.27.0
     container_name: project-alertmanager
     restart: unless-stopped
-    networks:
-      - monitoring
-    ports:
-      - "9093:9093"
+    networks: [monitoring]
+    ports: ["9093:9093"]
     command:
       - '--config.file=/etc/alertmanager/alertmanager.yml'
       - '--storage.path=/alertmanager'
       - '--web.external-url=http://localhost:9093'
-      - '--cluster.listen-address='
     volumes:
       - ./monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
     depends_on:
       prometheus:
         condition: service_healthy
 
-  # Grafana - визуализация метрик
   grafana:
     image: grafana/grafana:11.0.0
     container_name: project-grafana
     restart: unless-stopped
-    networks:
-      - monitoring
-    ports:
-      - "3000:3000"
+    networks: [monitoring]
+    ports: ["3000:3000"]
     environment:
-      # Настройки безопасности
       GF_SECURITY_ADMIN_USER: admin
       GF_SECURITY_ADMIN_PASSWORD: admin
       GF_USERS_ALLOW_SIGN_UP: "false"
-      GF_USERS_ALLOW_ORG_CREATE: "false"
-      
-      # Настройки UI
-      # GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/overview.json
-      
-      # Плагины
       GF_INSTALL_PLUGINS: grafana-piechart-panel,grafana-clock-panel
-      
-      # Логирование
       GF_LOG_LEVEL: warn
+      GF_FEATURE_TOGGLES_ENABLE: tracing
     volumes:
       - grafana-data:/var/lib/grafana
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
@@ -201,17 +166,17 @@ services:
     depends_on:
       prometheus:
         condition: service_healthy
+      loki:
+        condition: service_healthy
+      jaeger:
+        condition: service_healthy
 
-  # Kafka Exporter - экспорт метрик Kafka в Prometheus
   kafka-exporter:
     image: danielqsj/kafka-exporter:v1.7.0
     container_name: project-kafka-exporter
     restart: unless-stopped
-    networks:
-      - kafka-net
-      - monitoring
-    ports:
-      - "9308:9308"
+    networks: [kafka-net, monitoring]
+    ports: ["9308:9308"]
     command:
       - "--kafka.server=kafka:29092"
       - "--web.listen-address=0.0.0.0:9308"
@@ -220,88 +185,192 @@ services:
       kafka:
         condition: service_healthy
 
-  # Producer Service - публикует события в Kafka
-  producer-service:
-    build: 
-      context: ../apps/producer-service
-      dockerfile: Dockerfile
-    image: diploma-producer-service:latest
-    container_name: diploma-producer-service
+  # =============================================================================
+  # Observability Stack - Logs & Traces
+  # =============================================================================
+
+  loki:
+    image: grafana/loki:3.0.0
+    container_name: project-loki
     restart: unless-stopped
-    networks:
-      - kafka-net
-      - monitoring
-      - app-net
-    ports:
-      - "8081:8080"
-      - "9091:9090"
-    environment:
-      # Kafka настройки
-      KAFKA_BROKER_LIST: kafka:29092
-      KAFKA_TOPIC: events
-      
-      # Server настройки
-      SERVER_ADDRESS: ":8080"
-      SERVER_READ_TIMEOUT: 15s
-      SERVER_WRITE_TIMEOUT: 15s
-      SERVER_IDLE_TIMEOUT: 60s
-      
-      # Metrics настройки
-      METRICS_ENABLED: "true"
-      METRICS_PORT: ":9090"
-      METRICS_PATH: "/metrics"
-      
-      # Логирование
-      LOG_LEVEL: info
-    depends_on:
-      kafka:
-        condition: service_healthy
+    networks: [monitoring]
+    ports: ["3100:3100"]
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - loki-data:/loki
+      - ./monitoring/loki-config.yaml:/etc/loki/local-config.yaml:ro
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/health"]
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3100/ready"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 30s
 
-  # Consumer Service - потребляет события из Kafka
+  promtail:
+    image: grafana/promtail:3.0.0
+    container_name: project-promtail
+    restart: unless-stopped
+    networks: [monitoring, app-net, kafka-net]
+    volumes:
+      - ./monitoring/promtail-config.yaml:/etc/promtail/config.yml:ro
+      - /var/log:/var/log:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: -config.file=/etc/promtail/config.yml
+    depends_on:
+      loki:
+        condition: service_healthy
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.57
+    container_name: project-jaeger
+    restart: unless-stopped
+    networks: [monitoring, app-net]
+    ports:
+      - "16686:16686"  # Jaeger UI
+      - "14268:14268"  # HTTP collector
+      - "14250:14250"  # gRPC collector
+      - "6831:6831/udp"  # UDP collector (legacy)
+      - "6832:6832/udp"  # UDP collector (legacy)
+    environment:
+      COLLECTOR_OTLP_ENABLED: true
+      COLLECTOR_ZIPKIN_HOST_PORT: :9411
+      SPAN_STORAGE_TYPE: memory
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:14269/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  # OTEL Collector for better observability pipeline
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.91.0
+    container_name: project-otel-collector
+    restart: unless-stopped
+    networks: [monitoring, app-net]
+    ports:
+      - "4317:4317"   # OTLP gRPC receiver
+      - "4318:4318"   # OTLP HTTP receiver
+      - "8888:8888"   # Prometheus metrics
+      - "8889:8889"   # Prometheus exporter metrics
+    volumes:
+      - ./monitoring/otel-collector-config.yaml:/etc/otelcol-contrib/otel-collector-config.yaml:ro
+    command: ["--config=/etc/otelcol-contrib/otel-collector-config.yaml"]
+    depends_on:
+      jaeger:
+        condition: service_healthy
+      loki:
+        condition: service_healthy
+      prometheus:
+        condition: service_healthy
+
+  # =============================================================================
+  # Application Services
+  # =============================================================================
+
+  producer-service:
+    build: 
+      context: ../services/producer-service
+      dockerfile: Dockerfile
+    image: diploma-producer-service:latest
+    container_name: diploma-producer-service
+    restart: unless-stopped
+    networks: [kafka-net, monitoring, app-net]
+    ports:
+      - "8081:8080"
+      - "9091:9090"
+    environment:
+      # Kafka
+      KAFKA_BROKER_LIST: kafka:29092
+      KAFKA_TOPIC: events
+      # Server
+      SERVER_ADDRESS: ":8080"
+      SERVER_READ_TIMEOUT: 15s
+      SERVER_WRITE_TIMEOUT: 15s
+      SERVER_IDLE_TIMEOUT: 60s
+      # Metrics
+      METRICS_ENABLED: "true"
+      METRICS_PORT: ":9090"
+      METRICS_PATH: "/metrics"
+      # OpenTelemetry Configuration
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_INSECURE: "true"
+      OTEL_SERVICE_NAME: producer-service
+      OTEL_SERVICE_VERSION: "1.0.0"
+      OTEL_RESOURCE_ATTRIBUTES: "service.name=producer-service,service.version=1.0.0,deployment.environment=development"
+      # Tracing
+      TRACING_ENABLED: "true"
+      TRACING_ENDPOINT: http://otel-collector:4317
+      TRACING_SAMPLE_RATE: "1.0"
+      # Logging
+      LOG_LEVEL: info
+      LOG_FORMAT: json
+      LOG_OUTPUT: stdout
+      LOG_CORRELATION_ENABLED: "true"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      otel-collector:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
   consumer-service:
     build: 
-      context: ../apps/consumer-service
+      context: ../services/consumer-service
       dockerfile: Dockerfile
     image: diploma-consumer-service:latest
     container_name: diploma-consumer-service
     restart: unless-stopped
-    networks:
-      - kafka-net
-      - monitoring
-      - app-net
-    ports:
-      - "9094:9090" 
+    networks: [kafka-net, monitoring, app-net]
+    ports: ["9094:9090"]
     environment:
-      # Kafka настройки - оптимизированы для высокой производительности
+      # Kafka
       KAFKA_BROKER_LIST: kafka:29092
       KAFKA_TOPIC: events
       KAFKA_GROUP_ID: consumer-service
-      KAFKA_MIN_BYTES: 10000        # 10KB - больше данных за раз
-      KAFKA_MAX_BYTES: 10485760     # 10MB - максимальный размер batch'а
-      KAFKA_MAX_WAIT: 100ms         # Уменьшено с 1s до 100ms для быстрой реакции
-      KAFKA_COMMIT_INTERVAL: 5s     # Увеличено с 1s до 5s для batch коммитов
+      KAFKA_MIN_BYTES: 10000
+      KAFKA_MAX_BYTES: 10485760
+      KAFKA_MAX_WAIT: 100ms
+      KAFKA_COMMIT_INTERVAL: 5s
       KAFKA_START_OFFSET: latest
       KAFKA_MAX_RETRIES: 3
-      KAFKA_RETRY_BACKOFF: 50ms     # Уменьшено с 100ms
-      
-      # Consumer настройки - параллельная обработка
-      CONSUMER_WORKER_COUNT: 10     # Увеличено количество worker'ов
-      CONSUMER_BATCH_SIZE: 100      # Размер batch'а для коммитов
-      CONSUMER_PROCESS_TIMEOUT: 10s # Уменьшено с 30s
+      KAFKA_RETRY_BACKOFF: 50ms
+      # Consumer
+      CONSUMER_WORKER_COUNT: 10
+      CONSUMER_BATCH_SIZE: 100
+      CONSUMER_PROCESS_TIMEOUT: 10s
       CONSUMER_RETRY_ATTEMPTS: 3
-      CONSUMER_RETRY_DELAY: 100ms   # Уменьшено с 1s
-      
-      # Логирование - уменьшено для производительности
-      LOG_LEVEL: warn
+      CONSUMER_RETRY_DELAY: 100ms
+      # OpenTelemetry Configuration
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      OTEL_EXPORTER_OTLP_INSECURE: "true"
+      OTEL_SERVICE_NAME: consumer-service
+      OTEL_SERVICE_VERSION: "1.0.0"
+      OTEL_RESOURCE_ATTRIBUTES: "service.name=consumer-service,service.version=1.0.0,deployment.environment=development"
+      # Tracing
+      TRACING_ENABLED: "true"
+      TRACING_ENDPOINT: http://otel-collector:4317
+      TRACING_SAMPLE_RATE: "1.0"
+      # Metrics
+      METRICS_ENABLED: "true"
+      METRICS_PORT: ":9090"
+      METRICS_PATH: "/metrics"
+      # Logging
+      LOG_LEVEL: info
+      LOG_FORMAT: json
+      LOG_OUTPUT: stdout
+      LOG_CORRELATION_ENABLED: "true"
     depends_on:
       kafka:
         condition: service_healthy
+      otel-collector:
+        condition: service_started
     healthcheck:
       test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/health"]
       interval: 30s
@@ -309,12 +378,14 @@ services:
       retries: 3
       start_period: 30s
 
-  # Init container для создания топиков
+  # =============================================================================
+  # Initialization
+  # =============================================================================
+
   kafka-init:
     image: confluentinc/cp-kafka:7.6.0
     container_name: diploma-kafka-init
-    networks:
-      - kafka-net
+    networks: [kafka-net]
     depends_on:
       kafka:
         condition: service_healthy
