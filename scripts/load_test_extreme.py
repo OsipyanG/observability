@@ -1,99 +1,97 @@
 #!/usr/bin/env python3
 """
-Extreme Load Testing Script for Maximum RPS
-Optimized for MacBook M3 Pro with 18GB RAM
+Extreme load testing script for Diploma Project (15000 RPS)
 """
 
 import json
 import random
-import string
+import time
+import logging
 from locust import HttpUser, task, between, events
-from locust.runners import MasterRunner
+from locust.runners import MasterRunner, WorkerRunner
+from locust import LoadTestShape
 
+# Reduce locust logging
+logging.getLogger("locust").setLevel(logging.WARNING)
 
-class ExtremePerfUser(HttpUser):
-    """Экстремально оптимизированный пользователь для максимального RPS"""
+class ExtremePacing(LoadTestShape):
+    """Custom load shape for extreme testing - 3 minutes total"""
+    stages = [
+        {"duration": 30, "users": 500, "spawn_rate": 50},   # Разогрев - 30 сек
+        {"duration": 60, "users": 2000, "spawn_rate": 100}, # Наращивание - 1 мин
+        {"duration": 60, "users": 3000, "spawn_rate": 200}, # Пик нагрузки - 1 мин
+        {"duration": 30, "users": 1000, "spawn_rate": 100}, # Плавное снижение - 30 сек
+    ]
+
+    def tick(self):
+        run_time = self.get_run_time()
+        
+        for stage in self.stages:
+            if run_time < stage["duration"]:
+                return (stage["users"], stage["spawn_rate"])
+            run_time -= stage["duration"]
+        return None
+
+class ExtremeUser(HttpUser):
+    """User behavior for extreme load testing"""
     
-    # Минимальная задержка между запросами
-    wait_time = between(0.001, 0.005)
-    
-    # Переиспользуем соединения
-    connection_timeout = 5.0
-    network_timeout = 5.0
+    host = "http://localhost:8081"
+    wait_time = between(0.0001, 0.0002)  # Минимальные задержки для 15000 RPS
     
     def on_start(self):
-        """Инициализация - только один раз"""
-        # Предгенерируем данные для избежания накладных расходов
-        self.user_ids = [random.randint(1, 1000000) for _ in range(1000)]
-        self.data_templates = [
-            "User {} registered",
-            "User {} updated profile", 
-            "User {} logged in",
-            "User {} made purchase",
-            "User {} viewed product"
-        ]
-        self.counter = 0
+        """Called when a user starts"""
+        self.client.get("/health")
     
-    @task(10)
-    def create_user_event_fast(self):
-        """Быстрое создание событий - 95% запросов"""
-        user_id = self.user_ids[self.counter % len(self.user_ids)]
-        template = self.data_templates[self.counter % len(self.data_templates)]
-        
+    @task
+    def create_user_event(self):
+        """Create user events - основная нагрузка"""
         payload = {
-            "data": template.format(user_id)
+            "data": f"User {random.randint(1, 1000000)} action",
+            "timestamp": int(time.time())
         }
-        
-        self.counter += 1
-        
-        # Отправляем без ожидания детального ответа
         with self.client.post("/api/v1/events/user", 
-                             json=payload, 
-                             catch_response=True,
-                             timeout=2) as response:
-            if response.status_code >= 400:
-                response.failure(f"HTTP {response.status_code}")
-    
-    @task(1)
-    def health_check(self):
-        """Проверка здоровья - 5% запросов"""
-        with self.client.get("/health", 
-                           catch_response=True,
-                           timeout=1) as response:
+                            json=payload,
+                            catch_response=True) as response:
             if response.status_code != 200:
-                response.failure(f"Health check failed: {response.status_code}")
-
+                response.failure(f"Failed with status {response.status_code}")
 
 @events.init.add_listener
-def on_locust_init(environment, **kwargs):
-    """Оптимизация при инициализации"""
+def on_locust_init(environment, **_kwargs):
+    """Configure the test on initialization"""
     if isinstance(environment.runner, MasterRunner):
-        print("🚀 Extreme Performance Mode Activated")
-        print("📊 Target: Maximum RPS on MacBook M3 Pro")
+        print("🚀 Starting extreme load test - Target: 15000 RPS")
+        print("⚠️  WARNING: This test will generate extreme load!")
+        print("📊 Test stages (3 minutes total):")
+        print("   1. Warmup: 500 users (30 sec)")
+        print("   2. Ramp-up: 2000 users (1 min)")
+        print("   3. Peak load: 3000 users (1 min)")
+        print("   4. Cool-down: 1000 users (30 sec)")
+    elif isinstance(environment.runner, WorkerRunner):
+        print("Worker node started")
 
+@events.test_start.add_listener
+def on_test_start(environment, **_kwargs):
+    """Called when test starts"""
+    print("🚀 Extreme load test started...")
 
-# Конфигурация для максимальной производительности
-class ExtremePerfConfig:
-    """Конфигурация для экстремальной производительности"""
+@events.test_stop.add_listener
+def on_test_stop(environment, **_kwargs):
+    """Called when test stops"""
+    print("🏁 Extreme load test completed!")
     
-    # Рекомендуемые параметры для MacBook M3 Pro
-    RECOMMENDED_USERS = 20000  # Максимальное количество виртуальных пользователей
-    RECOMMENDED_SPAWN_RATE = 2000  # Быстрое создание пользователей
+    # Print final summary
+    stats = environment.stats
+    total_requests = stats.total.num_requests
+    total_failures = stats.total.num_failures
     
-    @staticmethod
-    def get_optimal_settings():
-        return {
-            "users": ExtremePerfConfig.RECOMMENDED_USERS,
-            "spawn_rate": ExtremePerfConfig.RECOMMENDED_SPAWN_RATE,
-            "run_time": "300s",  # 5 минут
-            "host": "http://localhost:8081"
-        }
-
-
-if __name__ == "__main__":
-    print("🔥 Extreme Performance Load Test Configuration")
-    print("=" * 50)
-    config = ExtremePerfConfig.get_optimal_settings()
-    for key, value in config.items():
-        print(f"  {key}: {value}")
-    print("\n💡 Запустите с помощью extreme_load_test.sh") 
+    if total_requests > 0:
+        success_rate = ((total_requests - total_failures) / total_requests) * 100
+        print(f"📈 Final Results:")
+        print(f"   Total Requests: {total_requests:,}")
+        print(f"   Failed Requests: {total_failures:,}")
+        print(f"   Success Rate: {success_rate:.2f}%")
+        print(f"   Peak RPS: {stats.total.max_rps:.2f}")
+        print(f"   Average RPS: {stats.total.current_rps:.2f}")
+        print(f"   Average Response Time: {stats.total.avg_response_time:.2f}ms")
+        print(f"   P95 Response Time: {stats.total.get_response_time_percentile(0.95):.2f}ms")
+        print(f"   P99 Response Time: {stats.total.get_response_time_percentile(0.99):.2f}ms") 

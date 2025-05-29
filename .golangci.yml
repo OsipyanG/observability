@@ -1,0 +1,42 @@
+run:
+  timeout: 5m
+  tests: true
+
+linters:
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - typecheck
+    - unused
+    - gofmt
+    - goimports
+    - misspell
+    - gocyclo
+    - gocognit
+    - funlen
+    - dupl
+    - prealloc
+    - gocritic
+    - gosec
+    - goconst
+    - unconvert
+    - unparam
+    - nakedret
+    - godox
+    - dogsled
+    - varnamelen
+    - testpackage
+    - thelper
+    - exhaustive
+    - forbidigo
+    - gochecknoinits
+    - gochecknoglobals
+    - depguard
+    - nolintlint
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0 
