@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Extreme load testing script for Diploma Project (15000 RPS)
+Extreme load testing script 
 """
 
 import json
@@ -36,7 +36,7 @@ class ExtremeUser(HttpUser):
     """User behavior for extreme load testing"""
     
     host = "http://localhost:8081"
-    wait_time = between(0.0001, 0.0002)  # Минимальные задержки для 15000 RPS
+    wait_time = between(0.0001, 0.0002)
     
     def on_start(self):
         """Called when a user starts"""

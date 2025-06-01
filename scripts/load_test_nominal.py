@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Nominal load testing script for Diploma Project (300 RPS)
+Nominal load testing script
 """
 
 import json
@@ -16,7 +16,7 @@ class NominalUser(HttpUser):
     """User behavior for nominal load testing"""
     
     host = "http://localhost:8081"
-    wait_time = between(0.5, 1.0)  # Adjusted wait time for 300 RPS
+    wait_time = between(0.5, 1.0)
     
     def on_start(self):
         """Called when a user starts"""

@@ -607,7 +607,7 @@
           "refId": "C"
         }
       ],
-      "title": "Event Publishing Duration",
+      "title": "Kafka publish time",
       "type": "timeseries"
     }
   ],

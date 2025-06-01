@@ -119,11 +119,6 @@ func (s *EventService) CreateUserEvent(ctx context.Context, data string) (*domai
 	return s.CreateAndPublish(ctx, domain.UserCreatedEvent, data)
 }
 
-// CreateUserEventJSON создает событие создания пользователя из JSON
-func (s *EventService) CreateUserEventJSON(ctx context.Context, data interface{}) (*domain.Event, error) {
-	return s.CreateAndPublishJSON(ctx, domain.UserCreatedEvent, data)
-}
-
 // updateStats обновляет статистику сервиса
 func (s *EventService) updateStats(event *domain.Event) {
 	s.mu.Lock()
