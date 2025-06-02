@@ -16,9 +16,6 @@ type EventService interface {
 	// CreateAndPublish создает и публикует событие
 	CreateAndPublish(ctx context.Context, eventType EventType, data string) (*Event, error)
 
-	// CreateAndPublishJSON создает и публикует событие из JSON данных
-	CreateAndPublishJSON(ctx context.Context, eventType EventType, data interface{}) (*Event, error)
-
 	// GetEventStats получает статистику по событиям
 	GetEventStats(ctx context.Context) (*EventStats, error)
 
@@ -55,9 +52,4 @@ type Logger interface {
 type MetricsCollector interface {
 	IncHTTPRequests(method, endpoint, status string)
 	ObserveHTTPDuration(method, endpoint string, duration float64)
-}
-
-// EventUseCase интерфейс для use cases событий
-type EventUseCase interface {
-	CreateUserEvent(ctx context.Context, data string) (*Event, error)
 }

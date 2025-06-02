@@ -13,39 +13,3 @@ datasources:
       queryTimeout: "60s"
       httpMethod: "POST"
     secureJsonData: {}
-
-  - name: Loki
-    type: loki
-    access: proxy
-    url: http://loki:3100
-    uid: loki
-    editable: true
-    jsonData:
-      maxLines: 1000
-      timeout: "60s"
-      derivedFields:
-        - datasourceUid: jaeger
-          matcherRegex: "trace_id=(\\w+)"
-          name: "TraceID"
-          url: "$${__value.raw}"
-          urlDisplayLabel: "View Trace"
-    secureJsonData: {}
-
-  - name: Jaeger
-    type: jaeger
-    access: proxy
-    url: http://jaeger:16686
-    uid: jaeger
-    editable: true
-    jsonData:
-      tracesToLogs:
-        datasourceUid: 'loki'
-        tags: ['job', 'instance', 'pod', 'namespace']
-        mappedTags: [{ key: 'service.name', value: 'service' }]
-        mapTagNamesEnabled: false
-        spanStartTimeShift: '-1h'
-        spanEndTimeShift: '1h'
-        filterByTraceID: true
-        filterBySpanID: false
-        lokiSearch: true
-    secureJsonData: {} 
