@@ -9,13 +9,9 @@ import (
 
 // ProducerMetrics реализует интерфейс ProducerMetrics
 type ProducerMetrics struct {
-	publishedEvents    *prometheus.CounterVec
-	failedEvents       *prometheus.CounterVec
-	publishDuration    *prometheus.HistogramVec
-	batchSize          prometheus.Histogram
-	batchFlushDuration prometheus.Histogram
-	bufferedEvents     prometheus.Gauge
-	kafkaWriterStats   *prometheus.GaugeVec
+	publishedEvents *prometheus.CounterVec
+	failedEvents    *prometheus.CounterVec
+	publishDuration *prometheus.HistogramVec
 }
 
 // NewProducerMetrics создает новые метрики для producer
@@ -43,33 +39,6 @@ func NewProducerMetrics() *ProducerMetrics {
 			},
 			[]string{"event_type"},
 		),
-		batchSize: promauto.NewHistogram(
-			prometheus.HistogramOpts{
-				Name:    "producer_batch_size",
-				Help:    "Size of event batches",
-				Buckets: []float64{1, 5, 10, 25, 50, 100, 250, 500, 1000},
-			},
-		),
-		batchFlushDuration: promauto.NewHistogram(
-			prometheus.HistogramOpts{
-				Name:    "producer_batch_flush_duration_seconds",
-				Help:    "Duration of batch flush operations",
-				Buckets: []float64{0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0},
-			},
-		),
-		bufferedEvents: promauto.NewGauge(
-			prometheus.GaugeOpts{
-				Name: "producer_buffered_events",
-				Help: "Number of events currently buffered for batching",
-			},
-		),
-		kafkaWriterStats: promauto.NewGaugeVec(
-			prometheus.GaugeOpts{
-				Name: "producer_kafka_writer_stats",
-				Help: "Kafka writer statistics",
-			},
-			[]string{"metric"},
-		),
 	}
 }
 
@@ -86,32 +55,4 @@ func (m *ProducerMetrics) IncFailedEvents(eventType string, reason string) {
 // ObservePublishDuration записывает время публикации события
 func (m *ProducerMetrics) ObservePublishDuration(eventType string, duration time.Duration) {
 	m.publishDuration.WithLabelValues(eventType).Observe(duration.Seconds())
-}
-
-// IncBatchSize записывает размер batch
-func (m *ProducerMetrics) IncBatchSize(size int) {
-	m.batchSize.Observe(float64(size))
-}
-
-// ObserveBatchFlushDuration записывает время flush batch'а
-func (m *ProducerMetrics) ObserveBatchFlushDuration(duration time.Duration) {
-	m.batchFlushDuration.Observe(duration.Seconds())
-}
-
-// IncBufferedEvents увеличивает счетчик буферизованных событий
-func (m *ProducerMetrics) IncBufferedEvents() {
-	m.bufferedEvents.Inc()
-}
-
-// DecBufferedEvents уменьшает счетчик буферизованных событий
-func (m *ProducerMetrics) DecBufferedEvents() {
-	m.bufferedEvents.Dec()
-}
-
-// UpdateKafkaWriterStats обновляет статистику Kafka writer
-func (m *ProducerMetrics) UpdateKafkaWriterStats(writes, messages, bytes, errors int64) {
-	m.kafkaWriterStats.WithLabelValues("writes").Set(float64(writes))
-	m.kafkaWriterStats.WithLabelValues("messages").Set(float64(messages))
-	m.kafkaWriterStats.WithLabelValues("bytes").Set(float64(bytes))
-	m.kafkaWriterStats.WithLabelValues("errors").Set(float64(errors))
 }

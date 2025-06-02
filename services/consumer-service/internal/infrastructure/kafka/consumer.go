@@ -3,7 +3,6 @@ package kafka
 import (
 	"context"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -20,8 +19,6 @@ type ConsumerMetrics interface {
 	IncFailedEvents(eventType string, reason string)
 	ObserveProcessingDuration(eventType string, duration time.Duration)
 	ObserveCommitDuration(duration time.Duration)
-	ObserveBatchSize(size int)
-	UpdateKafkaReaderStats(messages, bytes, rebalances, timeouts, errors int64)
 }
 
 // EventProcessor интерфейс для обработки событий
@@ -123,10 +120,6 @@ func (c *Consumer) Start(ctx context.Context) error {
 
 	c.logger.Info("Starting Kafka consumer with parallel processing")
 
-	// Запускаем горутину для сбора статистики
-	c.wg.Add(1)
-	go c.collectStats(ctx)
-
 	// Запускаем worker'ы для обработки сообщений
 	for i := 0; i < c.workerCount; i++ {
 		c.wg.Add(1)
@@ -177,15 +170,6 @@ func (c *Consumer) messageReader(ctx context.Context) {
 					return
 				}
 
-				// Проверяем, является ли это обычным таймаутом (пустой топик)
-				if isTimeoutError(err) {
-					// Для пустого топика это нормально, не логируем как ошибку
-					c.logger.WithError(err).Debug("No messages available, waiting...")
-					time.Sleep(c.config.RetryBackoff)
-					continue
-				}
-
-				// Логируем только реальные ошибки
 				c.logger.WithError(err).Warn("Error reading message from Kafka")
 				time.Sleep(c.config.RetryBackoff)
 				continue
@@ -199,20 +183,6 @@ func (c *Consumer) messageReader(ctx context.Context) {
 			}
 		}
 	}
-}
-
-// isTimeoutError проверяет, является ли ошибка таймаутом чтения
-func isTimeoutError(err error) bool {
-	if err == nil {
-		return false
-	}
-
-	errStr := err.Error()
-	// Проверяем различные типы таймаут ошибок Kafka
-	return strings.Contains(errStr, "timeout") ||
-		strings.Contains(errStr, "deadline exceeded") ||
-		strings.Contains(errStr, "context deadline exceeded") ||
-		strings.Contains(errStr, "i/o timeout")
 }
 
 // messageWorker обрабатывает сообщения из канала
@@ -323,7 +293,6 @@ func (c *Consumer) batchCommitter(ctx context.Context) {
 			c.logger.WithError(err).Error("Failed to commit message batch")
 		} else {
 			c.metrics.ObserveCommitDuration(time.Since(start))
-			c.metrics.ObserveBatchSize(len(batch))
 			c.logger.WithField("batch_size", len(batch)).Debug("Committed message batch")
 		}
 		batch = batch[:0] // Очищаем batch
@@ -395,37 +364,6 @@ func (c *Consumer) commitMessages(ctx context.Context, messages []kafka.Message)
 	}
 
 	return nil
-}
-
-// collectStats собирает статистику Kafka reader
-func (c *Consumer) collectStats(ctx context.Context) {
-	defer c.wg.Done()
-
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			c.mu.RLock()
-			if c.closed {
-				c.mu.RUnlock()
-				return
-			}
-			stats := c.reader.Stats()
-			c.mu.RUnlock()
-
-			c.metrics.UpdateKafkaReaderStats(
-				stats.Messages,
-				stats.Bytes,
-				stats.Rebalances,
-				stats.Timeouts,
-				stats.Errors,
-			)
-		}
-	}
 }
 
 // Close закрывает consumer

@@ -18,10 +18,6 @@ type ProducerMetrics interface {
 	IncPublishedEvents(eventType string)
 	IncFailedEvents(eventType string, reason string)
 	ObservePublishDuration(eventType string, duration time.Duration)
-	IncBatchSize(size int)
-	ObserveBatchFlushDuration(duration time.Duration)
-	IncBufferedEvents()
-	DecBufferedEvents()
 }
 
 // EventBatch представляет batch событий для отправки
@@ -223,9 +219,6 @@ func (p *Producer) batchSender(ctx context.Context) {
 			err := p.sendBatch(ctx, batch.Events)
 			duration := time.Since(start)
 
-			p.metrics.ObserveBatchFlushDuration(duration)
-			p.metrics.IncBatchSize(len(batch.Events))
-
 			if err != nil {
 				p.logger.WithFields(logrus.Fields{
 					"batch_size": len(batch.Events),
@@ -337,9 +330,6 @@ func (p *Producer) Publish(ctx context.Context, event *domain.Event) error {
 		return fmt.Errorf("event validation failed: %w", err)
 	}
 
-	p.metrics.IncBufferedEvents()
-	defer p.metrics.DecBufferedEvents()
-
 	// Отправляем событие в канал для батчинга
 	select {
 	case p.eventChan <- event:
@@ -406,7 +396,6 @@ func (p *Producer) PublishBatch(ctx context.Context, events []*domain.Event) err
 	start := time.Now()
 	defer func() {
 		duration := time.Since(start)
-		p.metrics.IncBatchSize(len(events))
 		// Записываем среднее время для batch
 		avgDuration := duration / time.Duration(len(events))
 		for _, event := range events {

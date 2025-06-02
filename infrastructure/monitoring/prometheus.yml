@@ -1,6 +1,6 @@
 global:
-  scrape_interval: 15s
-  evaluation_interval: 15s
+  scrape_interval: 5s
+  evaluation_interval: 5s
   external_labels:
     cluster: "diploma-project"
     environment: "development"
@@ -15,13 +15,13 @@ alerting:
             - alertmanager:9093
 
 scrape_configs:
-  # Producer Service - публикует события в Kafka
+  # Producer Service - критические метрики (высокочастотные)
   - job_name: "producer-service"
     static_configs:
       - targets: ["producer-service:9090"]
     metrics_path: "/metrics"
-    scrape_interval: 15s
-    scrape_timeout: 10s
+    scrape_interval: 5s
+    scrape_timeout: 3s
     honor_labels: true
     metric_relabel_configs:
       - source_labels: [__name__]
@@ -29,13 +29,13 @@ scrape_configs:
         target_label: service
         replacement: "producer"
 
-  # Consumer Service
+  # Consumer Service - критические метрики (высокочастотные)
   - job_name: "consumer-service"
     static_configs:
       - targets: ["consumer-service:9090"]
     metrics_path: "/metrics"
-    scrape_interval: 15s
-    scrape_timeout: 10s
+    scrape_interval: 5s
+    scrape_timeout: 3s
     honor_labels: true
     metric_relabel_configs:
       - source_labels: [__name__]
@@ -43,15 +43,16 @@ scrape_configs:
         target_label: service
         replacement: "consumer"
 
-  # Kafka метрики
+  # Kafka метрики - среднечастотные
   - job_name: "kafka-exporter"
     static_configs:
       - targets: ["kafka-exporter:9308"]
-    scrape_interval: 30s
-    scrape_timeout: 10s
+    scrape_interval: 10s
+    scrape_timeout: 5s
 
-  # Prometheus сам себя
+  # Prometheus сам себя - низкочастотные
   - job_name: "prometheus"
     static_configs:
       - targets: ["localhost:9090"]
     scrape_interval: 30s
+    scrape_timeout: 10s
