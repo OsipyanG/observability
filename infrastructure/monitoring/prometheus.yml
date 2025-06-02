@@ -2,8 +2,8 @@ global:
   scrape_interval: 15s
   evaluation_interval: 15s
   external_labels:
-    cluster: 'diploma-project'
-    environment: 'development'
+    cluster: "diploma-project"
+    environment: "development"
 
 rule_files:
   - "alert.rules.yml"
@@ -12,74 +12,46 @@ alerting:
   alertmanagers:
     - static_configs:
         - targets:
-          - alertmanager:9093
+            - alertmanager:9093
 
 scrape_configs:
   # Producer Service - публикует события в Kafka
-  - job_name: 'producer-service'
+  - job_name: "producer-service"
     static_configs:
-      - targets: ['producer-service:9090']
-    metrics_path: '/metrics'
+      - targets: ["producer-service:9090"]
+    metrics_path: "/metrics"
     scrape_interval: 15s
     scrape_timeout: 10s
     honor_labels: true
     metric_relabel_configs:
       - source_labels: [__name__]
-        regex: '(producer_.*|http_.*|go_.*|process_.*)'
+        regex: "(producer_.*|http_.*|go_.*|process_.*)"
         target_label: service
-        replacement: 'producer'
+        replacement: "producer"
 
   # Consumer Service
-  - job_name: 'consumer-service'
+  - job_name: "consumer-service"
     static_configs:
-      - targets: ['consumer-service:9090']
-    metrics_path: '/metrics'
+      - targets: ["consumer-service:9090"]
+    metrics_path: "/metrics"
     scrape_interval: 15s
     scrape_timeout: 10s
     honor_labels: true
     metric_relabel_configs:
       - source_labels: [__name__]
-        regex: '(consumer_.*|http_.*|go_.*|process_.*)'
+        regex: "(consumer_.*|http_.*|go_.*|process_.*)"
         target_label: service
-        replacement: 'consumer'
+        replacement: "consumer"
 
   # Kafka метрики
-  - job_name: 'kafka-exporter'
+  - job_name: "kafka-exporter"
     static_configs:
-      - targets: ['kafka-exporter:9308']
+      - targets: ["kafka-exporter:9308"]
     scrape_interval: 30s
     scrape_timeout: 10s
-
-  # OpenTelemetry Collector метрики
-  - job_name: 'otel-collector'
-    static_configs:
-      - targets: ['otel-collector:8888', 'otel-collector:8889']
-    scrape_interval: 30s
-    scrape_timeout: 10s
-    metric_relabel_configs:
-      - source_labels: [__name__]
-        regex: 'otelcol_.*'
-        target_label: component
-        replacement: 'otel-collector'
 
   # Prometheus сам себя
-  - job_name: 'prometheus'
+  - job_name: "prometheus"
     static_configs:
-      - targets: ['localhost:9090']
+      - targets: ["localhost:9090"]
     scrape_interval: 30s
-
-  # Loki метрики (если экспортирует)
-  - job_name: 'loki'
-    static_configs:
-      - targets: ['loki:3100']
-    metrics_path: '/metrics'
-    scrape_interval: 30s
-    scrape_timeout: 10s
-
-  # Jaeger метрики (если экспортирует)
-  - job_name: 'jaeger'
-    static_configs:
-      - targets: ['jaeger:14269']
-    metrics_path: '/metrics'
-    scrape_interval: 30s
-    scrape_timeout: 10s

@@ -97,7 +97,13 @@ services:
       zookeeper:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      test:
+        [
+          "CMD",
+          "kafka-broker-api-versions",
+          "--bootstrap-server",
+          "localhost:9092",
+        ]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -114,17 +120,25 @@ services:
     networks: [monitoring, app-net]
     ports: ["9090:9090"]
     command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--storage.tsdb.retention.time=15d'
-      - '--web.enable-lifecycle'
-      - '--web.enable-admin-api'
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=15d"
+      - "--web.enable-lifecycle"
+      - "--web.enable-admin-api"
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./monitoring/alert.rules.yml:/etc/prometheus/alert.rules.yml:ro
       - prometheus-data:/prometheus
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/-/healthy"]
+      test:
+        [
+          "CMD",
+          "wget",
+          "--quiet",
+          "--tries=1",
+          "--spider",
+          "http://localhost:9090/-/healthy",
+        ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -137,9 +151,9 @@ services:
     networks: [monitoring]
     ports: ["9093:9093"]
     command:
-      - '--config.file=/etc/alertmanager/alertmanager.yml'
-      - '--storage.path=/alertmanager'
-      - '--web.external-url=http://localhost:9093'
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+      - "--storage.path=/alertmanager"
+      - "--web.external-url=http://localhost:9093"
     volumes:
       - ./monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
     depends_on:
@@ -186,91 +200,11 @@ services:
         condition: service_healthy
 
   # ========================================================
-  # Observability Stack - Logs & Traces
-  # ========================================================
-
-  loki:
-    image: grafana/loki:3.0.0
-    container_name: project-loki
-    restart: unless-stopped
-    networks: [monitoring]
-    ports: ["3100:3100"]
-    command: -config.file=/etc/loki/local-config.yaml
-    volumes:
-      - loki-data:/loki
-      - ./monitoring/loki-config.yaml:/etc/loki/local-config.yaml:ro
-    healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3100/ready"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
-
-  promtail:
-    image: grafana/promtail:3.0.0
-    container_name: project-promtail
-    restart: unless-stopped
-    networks: [monitoring, app-net, kafka-net]
-    volumes:
-      - ./monitoring/promtail-config.yaml:/etc/promtail/config.yml:ro
-      - /var/log:/var/log:ro
-      - /var/lib/docker/containers:/var/lib/docker/containers:ro
-      - /var/run/docker.sock:/var/run/docker.sock
-    command: -config.file=/etc/promtail/config.yml
-    depends_on:
-      loki:
-        condition: service_healthy
-
-  jaeger:
-    image: jaegertracing/all-in-one:1.57
-    container_name: project-jaeger
-    restart: unless-stopped
-    networks: [monitoring, app-net]
-    ports:
-      - "16686:16686"  # Jaeger UI
-      - "14268:14268"  # HTTP collector
-      - "14250:14250"  # gRPC collector
-      - "6831:6831/udp"  # UDP collector (legacy)
-      - "6832:6832/udp"  # UDP collector (legacy)
-    environment:
-      COLLECTOR_OTLP_ENABLED: true
-      COLLECTOR_ZIPKIN_HOST_PORT: :9411
-      SPAN_STORAGE_TYPE: memory
-    healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:14269/"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
-
-  # OTEL Collector for better observability pipeline
-  otel-collector:
-    image: otel/opentelemetry-collector-contrib:0.91.0
-    container_name: project-otel-collector
-    restart: unless-stopped
-    networks: [monitoring, app-net]
-    ports:
-      - "4317:4317"   # OTLP gRPC receiver
-      - "4318:4318"   # OTLP HTTP receiver
-      - "8888:8888"   # Prometheus metrics
-      - "8889:8889"   # Prometheus exporter metrics
-    volumes:
-      - ./monitoring/otel-collector-config.yaml:/etc/otelcol-contrib/otel-collector-config.yaml:ro
-    command: ["--config=/etc/otelcol-contrib/otel-collector-config.yaml"]
-    depends_on:
-      jaeger:
-        condition: service_healthy
-      loki:
-        condition: service_healthy
-      prometheus:
-        condition: service_healthy
-
-  # ========================================================
   # Application Services
   # ========================================================
 
   producer-service:
-    build: 
+    build:
       context: ../services/producer-service
       dockerfile: Dockerfile
     image: diploma-producer-service:latest
@@ -321,7 +255,7 @@ services:
       start_period: 30s
 
   consumer-service:
-    build: 
+    build:
       context: ../services/consumer-service
       dockerfile: Dockerfile
     image: diploma-consumer-service:latest
@@ -372,7 +306,15 @@ services:
       otel-collector:
         condition: service_started
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:9090/health"]
+      test:
+        [
+          "CMD",
+          "wget",
+          "--quiet",
+          "--tries=1",
+          "--spider",
+          "http://localhost:9090/health",
+        ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -396,4 +338,4 @@ services:
         kafka-topics --create --if-not-exists --bootstrap-server kafka:29092 --partitions 1 --replication-factor 1 --topic events-dlq
         echo 'Topics created successfully!'
       "
-    restart: "no" 
+    restart: "no"

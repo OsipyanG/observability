@@ -74,16 +74,6 @@ groups:
           summary: "Kafka брокер недоступен"
           description: "Kafka брокер не отвечает"
 
-      - alert: KafkaTopicLagHigh
-        expr: sum by(topic) (kafka_topic_partition_current_offset) - sum by(topic) (kafka_topic_partition_oldest_offset) > 10000
-        for: 5m
-        labels:
-          severity: warning
-          service: kafka
-        annotations:
-          summary: "Большой лаг в Kafka топике"
-          description: "Разница между текущим и старейшим офсетом превышает 10000"
-
       # System Alerts
       - alert: HighCPUUsage
         expr: rate(process_cpu_seconds_total[5m]) > 0.8
